@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "kind": "forma-grand-prix-evidence-archive",
+  "publishedAt": "2026-10-28T13:34:30.188Z",
+  "observedAt": "2026-10-28T12:52:23.124Z",
+  "suite": "islands",
+  "status": "completed",
+  "quality": "qualified",
+  "remote": {
+    "repository": "getforma-dev/forma-grandprix",
+    "runId": "40691385991",
+    "attempt": "1",
+    "artifactId": "12817193788",
+    "artifactName": "grand-prix-islands-40691385991-1",
+    "workflow": ".github/workflows/grand-prix-islands.yml",
+    "conclusion": "success",
+    "url": "https://github.com/getforma-dev/forma-grandprix/actions/runs/40691385991/attempts/1"
+  },
+  "source": {
+    "laboratoryCommit": "42796d26717dd92a6615b11e540aec3b1af29a2f",
+    "formaCommits": [],
+    "originalManifestSha256": "7a039487e1c46f97bbec4c60da368df916f2efebfee309aa3621964ceb422b5b",
+    "originalSealSha256": "607fecc75b63d56cb6097579f1f5bafd73aa4c285148b75f9517c091fa8003ed"
+  },
+  "archive": {
+    "sha256": "2ff114edfc5f22fb623bd3e80dfcc935c37c789dfeb8264c73c603f0b51dc821",
+    "bytes": 401972,
+    "format": "original-github-actions-zip"
+  },
+  "release": {
+    "id": 426709437,
+    "tag": "evidence-2026-10-28",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28",
+    "target": "79f3f58f6c6b9a0fad27a8926fc4b9044c20811e"
+  },
+  "asset": {
+    "id": 685104391,
+    "name": "grand-prix-islands-40691385991-1-12817193788-2ff114edfc5f22fb623bd3e80dfcc935c37c789dfeb8264c73c603f0b51dc821.zip",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/download/evidence-2026-10-28/grand-prix-islands-40691385991-1-12817193788-2ff114edfc5f22fb623bd3e80dfcc935c37c789dfeb8264c73c603f0b51dc821.zip"
+  },
+  "note": "Preserves the original attempt, including failures and diagnostic limits. Publication is not a new measurement or an endorsement of an improvement."
+}

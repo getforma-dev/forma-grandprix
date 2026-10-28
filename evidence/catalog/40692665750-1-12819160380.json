@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "kind": "forma-grand-prix-evidence-archive",
+  "publishedAt": "2026-10-28T13:34:46.863Z",
+  "observedAt": "2026-10-28T13:01:25.117Z",
+  "suite": "compression",
+  "status": "completed",
+  "quality": "qualified",
+  "remote": {
+    "repository": "getforma-dev/forma-grandprix",
+    "runId": "40692665750",
+    "attempt": "1",
+    "artifactId": "12819160380",
+    "artifactName": "grand-prix-compression-40692665750-1",
+    "workflow": ".github/workflows/grand-prix-compression.yml",
+    "conclusion": "success",
+    "url": "https://github.com/getforma-dev/forma-grandprix/actions/runs/40692665750/attempts/1"
+  },
+  "source": {
+    "laboratoryCommit": "0904eff7c19100b223210e3a48ff088138fd56bd",
+    "formaCommits": [
+      "fc76ea8531f0e3a85d0224087384e41f52040e3c"
+    ],
+    "originalManifestSha256": "68629f0a668765d9e75a0309cd98b4ecdbe45ced9223b7598ea54bb57109d88e",
+    "originalSealSha256": "ddbb8a488a53340ca4ae4ad291550d1b1bcf0ebaa6c8f0a902dddfec0382462a"
+  },
+  "archive": {
+    "sha256": "6127214fb95837edd470775613aa57e0cb3e2851ef837200742543f12ed116ba",
+    "bytes": 5388002,
+    "format": "original-github-actions-zip"
+  },
+  "release": {
+    "id": 426709437,
+    "tag": "evidence-2026-10-28",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28",
+    "target": "79f3f58f6c6b9a0fad27a8926fc4b9044c20811e"
+  },
+  "asset": {
+    "id": 685105001,
+    "name": "grand-prix-compression-40692665750-1-12819160380-6127214fb95837edd470775613aa57e0cb3e2851ef837200742543f12ed116ba.zip",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/download/evidence-2026-10-28/grand-prix-compression-40692665750-1-12819160380-6127214fb95837edd470775613aa57e0cb3e2851ef837200742543f12ed116ba.zip"
+  },
+  "note": "Preserves the original attempt, including failures and diagnostic limits. Publication is not a new measurement or an endorsement of an improvement."
+}

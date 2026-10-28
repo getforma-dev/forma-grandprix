@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "kind": "forma-grand-prix-evidence-archive",
+  "publishedAt": "2026-10-28T13:34:23.200Z",
+  "observedAt": "2026-10-28T12:52:18.351Z",
+  "suite": "client",
+  "status": "failed",
+  "quality": "unqualified",
+  "remote": {
+    "repository": "getforma-dev/forma-grandprix",
+    "runId": "40691381679",
+    "attempt": "1",
+    "artifactId": "12817287168",
+    "artifactName": "grand-prix-client-40691381679-1",
+    "workflow": ".github/workflows/grand-prix-client.yml",
+    "conclusion": "failure",
+    "url": "https://github.com/getforma-dev/forma-grandprix/actions/runs/40691381679/attempts/1"
+  },
+  "source": {
+    "laboratoryCommit": "42796d26717dd92a6615b11e540aec3b1af29a2f",
+    "formaCommits": [
+      "fc76ea8531f0e3a85d0224087384e41f52040e3c"
+    ],
+    "originalManifestSha256": "a491939fa2592f6757fc658f110a1d65eb1337c0b8fd5029bce4029d88584e1a",
+    "originalSealSha256": "98405f2f4560102b84fdcf726b58187090c4b33f4dea87b90e2f4409db70c216"
+  },
+  "archive": {
+    "sha256": "f999a3f29147a0e685ed945b44a2b1e7bec4414cd925567394a4b9720297e657",
+    "bytes": 43651,
+    "format": "original-github-actions-zip"
+  },
+  "release": {
+    "id": 426709437,
+    "tag": "evidence-2026-10-28",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28",
+    "target": "79f3f58f6c6b9a0fad27a8926fc4b9044c20811e"
+  },
+  "asset": {
+    "id": 685104079,
+    "name": "grand-prix-client-40691381679-1-12817287168-f999a3f29147a0e685ed945b44a2b1e7bec4414cd925567394a4b9720297e657.zip",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/download/evidence-2026-10-28/grand-prix-client-40691381679-1-12817287168-f999a3f29147a0e685ed945b44a2b1e7bec4414cd925567394a4b9720297e657.zip"
+  },
+  "note": "Preserves the original attempt, including failures and diagnostic limits. Publication is not a new measurement or an endorsement of an improvement."
+}
