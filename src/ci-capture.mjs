@@ -5,13 +5,14 @@ import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { ROOT, acquire, config, environment, hash, readJSON, runPath, safePath, seal, sourceIdentity, writeJSON } from './session.mjs';
+import { ROOT, acquire, config, environment, git, hash, readJSON, runPath, safePath, seal, sourceIdentity, writeJSON } from './session.mjs';
 import { generateReport } from './report.mjs';
 import { planCleanup, applyCleanup } from './cleanup.mjs';
 import { planRecovery, applyRecovery } from './recovery.mjs';
 import { authenticatePhaseReceipt, BUDGET_FILES, PHASE_FILE } from '../harness/ci-run.mjs';
 import { evaluateBudgets } from '../harness/budgets.mjs';
 import { ensureFormaSource } from '../harness/forma-source.mjs';
+import { BASELINE_SOURCE } from '../harness/prepare-car.mjs';
 
 export const SUITES = ['server', 'client', 'islands', 'paired', 'compression'];
 const serverEvents = ['sprint', 'endurance', 'multicore', 'reaction', 'fuel', 'grid', 'weight', 'pitstop'];
@@ -34,13 +35,32 @@ function selectedRefs(suite, env) {
   return refs;
 }
 const exact = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
+function recipeSelection(root, suite, env, laboratoryCommit) {
+  if (suite !== 'server') {
+    if (env.GP_RECIPE_COHORT) throw Error('Recipe cohort selection applies only to the server suite');
+    return {};
+  }
+  const recipeCohort = env.GP_RECIPE_COHORT || 'frozen';
+  if (!['frozen', 'laboratory'].includes(recipeCohort)) throw Error('Recipe cohort must be frozen or laboratory');
+  const cfg = config(root), commit = recipeCohort === 'frozen' ? BASELINE_SOURCE : laboratoryCommit || git(root, ['rev-parse', 'HEAD']);
+  if (!exact(commit)) throw Error('Laboratory recipes require an exact committed laboratory revision');
+  return { recipeCohort, recipeSource: { kind: recipeCohort,
+    repository: recipeCohort === 'frozen' ? cfg.formaSource?.repositoryUrl || null : cfg.repository || null,
+    commit, path: recipeCohort === 'frozen' ? 'benchmarks/grand-prix/contestants' : 'contestants' } };
+}
+export function preparationRefs(root, suite, env = process.env) {
+  if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
+  const refs = selectedRefs(suite, env), recipe = recipeSelection(root, suite, env);
+  const frozen = ['paired', 'compression'].includes(suite) || suite === 'server' && recipe.recipeCohort === 'frozen';
+  return [...new Set([...(frozen ? [BASELINE_SOURCE] : []), ...refs])];
+}
 export function driverPlan(root, suite, env = process.env) {
   if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
   const profile = env.GP_PROFILE || 'gha-4-v1';
   if (!['gha-4-v1', 'native-8-v1'].includes(profile)) throw Error('Unknown resource profile');
   if (!['true', 'false'].includes(env.GP_DIAGNOSTIC ?? 'false')) throw Error('GP_DIAGNOSTIC must be true or false');
   const diagnostic = env.GP_DIAGNOSTIC === 'true';
-  const refs = selectedRefs(suite, env);
+  const refs = selectedRefs(suite, env), recipe = recipeSelection(root, suite, env);
   const runtimeEnv = { GP_PROFILE: profile, GP_DIAGNOSTIC: String(diagnostic) };
   const args = [];
   let budgetCheck = { applicable: false, reason: 'No top-level server budget evaluation for this suite; inspect per-trial records.' };
@@ -53,7 +73,7 @@ export function driverPlan(root, suite, env = process.env) {
     const applicable = suite === 'server' && (cars === 'all' || cars.split(',').includes('forma')) && ['sprint', 'fuel', 'grid', 'weight'].every(event => events.includes(event));
     budgetCheck = { applicable, reason: applicable ? 'All required Forma strength measurements were selected.' : 'Not applicable: requires Forma and server events 1,5,6,7.' };
     Object.assign(runtimeEnv, { GP_CARS: suite === 'compression' ? 'forma' : env.GP_CARS || 'all', GP_EVENTS: suite === 'compression' ? '1,3,4,5,7' : env.GP_EVENTS || '1-8',
-      GP_FORMA_REF: refs[0] || '', GP_BASELINE: 'true', GP_COMPRESSION: String(suite === 'compression'), GP_CHECK_BUDGETS: String(budgetCheck.applicable) });
+      GP_FORMA_REF: refs[0] || '', GP_BASELINE: String(suite === 'compression' || recipe.recipeCohort === 'frozen'), GP_COMPRESSION: String(suite === 'compression'), GP_CHECK_BUDGETS: String(budgetCheck.applicable) });
   } else if (suite === 'paired') {
     args.push('harness/paired-server.mjs'); runtimeEnv.GP_FORMA_REFS = refs.join(',');
   } else {
@@ -67,7 +87,7 @@ export function driverPlan(root, suite, env = process.env) {
     } else args.push('harness/islands-linux.mjs', '--chrome', chrome, '--cars', env.GP_CARS && env.GP_CARS !== 'all' ? env.GP_CARS : config(root).suites.islands.cars.join(','));
     if (diagnostic) args.push('--diagnostic');
   }
-  return { suite, profile, diagnostic, formaRefs: refs, budgetCheck, args, env: runtimeEnv };
+  return { suite, profile, diagnostic, formaRefs: refs, ...recipe, budgetCheck, args, env: runtimeEnv };
 }
 export function beginAttempt(root, suite, env = process.env) {
   if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
@@ -86,6 +106,10 @@ export function beginAttempt(root, suite, env = process.env) {
       runAttempt: env.GITHUB_RUN_ATTEMPT || null, job: env.GITHUB_JOB || null, requestId: env.GP_REQUEST_ID || null,
       url: env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID ? `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : null },
     note: 'Hosted attempt. Qualification is derived from original driver evidence, not job success alone.' };
+  try {
+    const recipe = recipeSelection(root, suite, env, source.commit);
+    if (recipe.recipeCohort) { manifest.config.recipeCohort = recipe.recipeCohort; manifest.recipeSource = recipe.recipeSource; }
+  } catch (error) { manifest.selectionError = error.message; }
   if (['server', 'islands'].includes(suite)) {
     try {
       const cars = !env.GP_CARS || env.GP_CARS === 'all' ? config(root).suites[suite].cars : env.GP_CARS.split(',');
@@ -115,6 +139,7 @@ export async function captureAttempt(root, suite, env = process.env) {
   let fd, code = 1;
   try {
     const plan = driverPlan(root, suite, env);
+    if (suite === 'server') { assert.equal(manifest.config.recipeCohort, plan.recipeCohort, 'Recipe cohort changed after preparation'); assert.deepEqual(manifest.recipeSource, plan.recipeSource, 'Recipe source changed after preparation'); }
     manifest.status = 'running'; manifest.plan = plan; writeJSON(file, manifest);
     fd = fs.openSync(logFile, 'wx');
     const phaseSecret = randomBytes(32).toString('hex');
@@ -220,9 +245,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     const [operation, suite] = process.argv.slice(2);
     if (operation === 'begin') { const result = beginAttempt(ROOT, suite); console.log(`Retaining ${result.id}: laboratory ${result.labSourceCommit}; Forma ${result.formaSourceCommits.join(',') || 'published baseline'}`); }
     else if (operation === 'prepare') {
-      if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
-      const refs = selectedRefs(suite, process.env);
-      for (const ref of new Set(suite === 'islands' ? [] : [config(ROOT).baseline.sourceCommit, ...refs])) { ensureFormaSource(ref); console.log('Prepared exact Forma source ' + ref); }
+      for (const ref of preparationRefs(ROOT, suite)) { ensureFormaSource(ref); console.log('Prepared exact Forma source ' + ref); }
     }
     else if (operation === 'run') process.exitCode = await captureAttempt(ROOT, suite);
     else if (operation === 'finish') console.log(JSON.stringify(await finishAttempt(ROOT, suite)));

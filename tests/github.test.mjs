@@ -30,6 +30,13 @@ test('dispatch uses structured gh stdin and private account access does not retu
  const root=fixture(t),calls=[];const github=createGitHub(root,{command:async(program,args,options)=>{calls.push([program,args,options]);return{stdout:args[0]==='workflow'?'https://github.com/'+REPOSITORY+'/actions/runs/123':'tester\n'};}});
  const result=await github.dispatch({suite:'paired',formaRefs:sha});assert.equal(result.runUrl,'https://github.com/'+REPOSITORY+'/actions/runs/123');assert.deepEqual(calls[0][1],['workflow','run','grand-prix-paired.yml','--repo',REPOSITORY,'--ref','main','--json']);assert.equal(JSON.parse(calls[0][2].input).forma_refs,sha);assert.equal((await github.account()).login,'tester');
 });
+test('server recipe cohort is explicit and cannot silently affect another lane',t=>{
+ const root=fixture(t);
+ assert.equal(dispatchPlan(root,{suite:'server'}).fields.recipe_cohort,'frozen');
+ assert.equal(dispatchPlan(root,{suite:'server',recipeCohort:'laboratory'}).fields.recipe_cohort,'laboratory');
+ for(const recipeCohort of ['',true,'latest','../frozen'])assert.throws(()=>dispatchPlan(root,{suite:'server',recipeCohort}));
+ for(const suite of ['client','paired','compression','islands'])assert.throws(()=>dispatchPlan(root,{suite,recipeCohort:'laboratory'}));
+});
 test('import retains failed remote evidence, its source identity, original time and prefixed trial identity',async t=>{
  const f=remoteFixture(t),result=await f.client.importRun(123,()=>{},1),dir=path.join(f.root,'runs',result.id),manifest=readJSON(path.join(dir,'manifest.json'));
  assert.equal(manifest.originalStatus,'failed');assert.equal(manifest.originalQuality,'unqualified');assert.equal(manifest.observedAt,f.manifest.startedAt);assert.equal(manifest.remote.originalManifest.expected[0].trial,'artifacts/trial-a');assert.equal(manifest.expected[0].trial,'artifacts/remote/artifacts/trial-a');assert.equal(manifest.labSourceCommit,sha);assert.equal(manifest.formaSourceCommits[0],'b'.repeat(40));assert.equal(verify(dir).ok,true);assert.equal(fs.readFileSync(path.join(dir,'artifacts/remote/run.log'),'utf8'),'preserved preparation failure');assert(fs.existsSync(path.join(dir,'original.zip')));assert(!fs.existsSync(path.join(f.root,'.grandprix/active.json')));assert.equal((await f.client.importRun(123)).reused,true);

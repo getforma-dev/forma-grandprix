@@ -66,6 +66,14 @@ Islands use their frozen registry cohort. They currently do not substitute the
 selected Forma source candidate. The panel must display this boundary rather than
 present frozen package observations as current release measurements.
 
+Server `recipe_cohort` defaults to `frozen`, the original Round 2 recipe commit.
+To measure reviewed competitor updates, commit their adapters and lockfiles, then
+choose `laboratory` to archive `contestants/` from the exact workflow revision.
+The control panel calls this **Committed laboratory adapters**. The manifest and
+human report record both recipe cohort/source and the independent Forma candidate.
+This is a new cohort; do not reinterpret the frozen baseline or pool rates from
+separate machines. The paired and compression lanes retain their frozen controls.
+
 ## Keep readable, durable results
 
 Each attempted workflow starts an evidence record before dependency installation.

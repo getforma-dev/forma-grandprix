@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { beginAttempt, captureAttempt, finishAttempt, driverPlan, eventSelection } from '../src/ci-capture.mjs';
+import { execFileSync } from 'node:child_process';
+import { beginAttempt, captureAttempt, finishAttempt, driverPlan, eventSelection, preparationRefs } from '../src/ci-capture.mjs';
 import { verify } from '../src/session.mjs';
 
 const exact = 'a'.repeat(40);
@@ -11,7 +12,7 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gp-ci-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const put = (relative, value) => { const file = path.join(root, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value)); return file; };
-  put('config/laboratory.json', { protocolVersion: 'test', suites: { server: { cars: ['forma', 'react-node'] }, islands: { cars: ['forma', 'react-node'] }, client: { cars: ['forma', 'react'] } } });
+  put('config/laboratory.json', { protocolVersion: 'test', repository: 'getforma-dev/forma-grandprix', formaSource: { repositoryUrl: 'https://github.com/getforma-dev/forma.git' }, suites: { server: { cars: ['forma', 'react-node'] }, islands: { cars: ['forma', 'react-node'] }, client: { cars: ['forma', 'react'] } } });
   put('harness/chromium-linux-lock.json', { executableSha256: 'b'.repeat(64) });
   const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GP_')));
   return { root, put, env: { ...cleanEnv, GP_RUN_ID: 'server-test-1', GP_FORMA_REF: exact, GP_CARS: 'forma', GP_EVENTS: '1', GITHUB_REPOSITORY: 'getforma-dev/forma-grandprix', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GP_REQUEST_ID: 'local-receipt' } };
@@ -64,6 +65,7 @@ test('preparation failure is retained, readable, sealed, and cannot replace prio
 test('failed worker logs and samples survive compaction; dependencies and outputs do not', async t => {
   const f = fixture(t);
   f.put('harness/ci-run.mjs', `import fs from 'node:fs'; import path from 'node:path';
+import { execFileSync } from 'node:child_process';
     const base = process.env.GP_RESULTS_DIR;
     for (const [name, content] of [['raw/sprint/forma.failed.json',JSON.stringify({event:'sprint',car:'forma',error:'deliberate control'})],['case-contexts/forma/target/generated.bin','generated'],['case-contexts/forma/Cargo.lock','locked'],['case-client/published/client-race/node_modules/lib/index.js','dependency']]) {const file=path.join(base,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,content);}
     console.log('deliberate worker failure'); process.exitCode = 7;`);
@@ -130,7 +132,8 @@ function qualifiedBudgetRecords() {
 }
 async function budgetFixture(t,{edit=()=>{},worker='normal',extraCar=false}={}) {
   const f=fixture(t);f.env={...f.env,GP_EVENTS:'1,5-7',...(extraCar?{GP_CARS:'forma,react-node'}:{})};
-  f.put('harness/ci-run.mjs',`import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';
+  f.put('harness/ci-run.mjs',`import fs from 'node:fs'; import path from 'node:path';
+import { execFileSync } from 'node:child_process'; import assert from 'node:assert/strict';
     import {runServerCI} from ${JSON.stringify(wrapperUrl)}; import {evaluateBudgets} from ${JSON.stringify(budgetsUrl)};
     const root=process.env.GP_RESULTS_DIR;
     const compute=()=>{try{const records=Object.fromEntries(['sprint','fuel','grid','weight'].map(event=>[event,JSON.parse(fs.readFileSync(path.join(root,'raw',event,'forma.json')))]));const result=evaluateBudgets(records);fs.writeFileSync(path.join(root,'raw/forma-budgets.json'),JSON.stringify(result));return{status:result.passed?0:1};}catch{return{status:1};}};
@@ -164,4 +167,57 @@ test('changed phase receipts or budget files cannot masquerade as an authenticat
 
 test('phase authentication rejects an unrelated key or run identity',async t=>{
  const f=await budgetFixture(t),file=path.join(f.root,'runs',f.env.GP_RUN_ID,'artifacts/ci-phases.json');assert.throws(()=>authenticatePhaseReceipt(file,'0'.repeat(64),f.env.GP_RUN_ID),/authentication failed/);assert.throws(()=>authenticatePhaseReceipt(file,'0'.repeat(64),'another-run'));
+});
+
+const frozenRecipes = '3d9de62d0709e8158cadd62be387ff1481ca9e66';
+function commitLaboratory(root) {
+  const git = (...args) => execFileSync('git', ['-c','core.hooksPath=/dev/null', '-c','commit.gpgsign=false', '-c','user.name=Test', '-c','user.email=test@example.invalid', ...args], { cwd: root, encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }).trim();
+  git('init','-q'); git('add','.'); git('commit','-qm','Fixture laboratory');
+  return git('rev-parse','HEAD');
+}
+test('frozen hosted recipe cohort remains the default and records its exact independent source', t => {
+  const f = fixture(t), plan = driverPlan(f.root, 'server', { ...f.env, GP_BASELINE: 'false' });
+  assert.equal(plan.recipeCohort, 'frozen'); assert.equal(plan.env.GP_BASELINE, 'true');
+  assert.deepEqual(plan.recipeSource, { kind:'frozen', repository:'https://github.com/getforma-dev/forma.git', commit:frozenRecipes, path:'benchmarks/grand-prix/contestants' });
+  assert.deepEqual(preparationRefs(f.root, 'server', f.env), [frozenRecipes, exact]);
+  const manifest = beginAttempt(f.root, 'server', f.env);
+  assert.equal(manifest.config.recipeCohort, 'frozen'); assert.deepEqual(manifest.recipeSource, plan.recipeSource);
+});
+test('laboratory cohort selects committed updated recipes and fetches only selected Forma source', t => {
+  const f = fixture(t); f.put('contestants/react-node/package-lock.json', { updated:'explicit reviewed competitor lock' });
+  const lab = commitLaboratory(f.root), env = { ...f.env, GP_RECIPE_COHORT: 'laboratory' };
+  const plan = driverPlan(f.root, 'server', env);
+  assert.equal(plan.env.GP_BASELINE, 'false'); assert.equal(plan.env.GP_FORMA_REF, exact);
+  assert.deepEqual(plan.recipeSource, { kind:'laboratory', repository:'getforma-dev/forma-grandprix', commit:lab, path:'contestants' });
+  assert.notEqual(plan.recipeSource.commit, plan.formaRefs[0]);
+  assert.deepEqual(preparationRefs(f.root, 'server', env), [exact]);
+  assert.deepEqual(preparationRefs(f.root, 'server', { ...env, GP_FORMA_REF:'' }), []);
+  const manifest = beginAttempt(f.root, 'server', env);
+  assert.equal(manifest.config.recipeCohort, 'laboratory'); assert.deepEqual(manifest.recipeSource, plan.recipeSource);
+});
+test('unknown or inapplicable recipe selections and uncommitted laboratory identity refuse planning', t => {
+  const f = fixture(t);
+  for (const value of ['latest','main','false','laboratory; echo bad']) assert.throws(() => driverPlan(f.root,'server',{...f.env,GP_RECIPE_COHORT:value}), /frozen or laboratory/);
+  assert.throws(() => driverPlan(f.root,'server',{...f.env,GP_RECIPE_COHORT:'laboratory'}), /exact committed/);
+  for (const suite of ['client','paired','compression','islands']) for (const cohort of ['frozen','laboratory']) {
+    const env={...f.env,GP_FORMA_REF:suite==='islands'?'':exact,GP_FORMA_REFS:['client','paired'].includes(suite)?exact:'',GP_RECIPE_COHORT:cohort,CHROME_PATH:'/authenticated/chrome'};
+    assert.throws(() => driverPlan(f.root,suite,env), /only to the server/);
+    assert.throws(() => preparationRefs(f.root,suite,env), /only to the server/);
+  }
+  assert.deepEqual(preparationRefs(f.root,'client',{...f.env,GP_FORMA_REFS:exact}),[exact]);
+  assert.deepEqual(preparationRefs(f.root,'islands',{...f.env,GP_FORMA_REF:''}),[]);
+  for(const suite of ['paired','compression']) assert.deepEqual(preparationRefs(f.root,suite,{...f.env,GP_FORMA_REFS:exact}),[frozenRecipes,exact]);
+});
+test('changing recipe cohort between retained preparation and execution fails before driver launch', async t => {
+  const f = fixture(t); f.put('harness/ci-run.mjs', "throw Error('driver must never run');"); commitLaboratory(f.root);
+  beginAttempt(f.root,'server',f.env);
+  assert.equal(await captureAttempt(f.root,'server',{...f.env,GP_RECIPE_COHORT:'laboratory'}),1);
+  const manifest=JSON.parse(fs.readFileSync(path.join(f.root,'runs',f.env.GP_RUN_ID,'manifest.json')));
+  assert.equal(manifest.status,'failed'); assert.match(manifest.error,/Recipe cohort changed/);
+  assert(!fs.existsSync(path.join(f.root,'runs',f.env.GP_RUN_ID,'run.log')));
+});
+test('server workflow exposes a safe frozen-default cohort choice with a direct environment binding', () => {
+  const workflow=fs.readFileSync(new URL('../.github/workflows/grand-prix.yml',import.meta.url),'utf8');
+  assert.match(workflow,/recipe_cohort:[\s\S]*?default: frozen[\s\S]*?type: choice[\s\S]*?- frozen\n\s+- laboratory/);
+  assert.match(workflow,/GP_RECIPE_COHORT: \$\{\{ inputs\.recipe_cohort \}\}/);
 });

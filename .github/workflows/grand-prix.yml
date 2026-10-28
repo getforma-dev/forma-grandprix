@@ -32,6 +32,13 @@ on:
         description: 'Events 1-8 by default; choose a subset such as 1,5-7 when needed'
         default: '1-8'
         type: string
+      recipe_cohort:
+        description: 'Frozen Round 2 recipes, or current committed laboratory recipes with reviewed dependency updates'
+        default: frozen
+        type: choice
+        options:
+          - frozen
+          - laboratory
       forma_ref:
         description: 'Exact Forma source commit; empty explicitly uses published 3.0.0 control'
         default: 'fc76ea8531f0e3a85d0224087384e41f52040e3c'
@@ -53,6 +60,7 @@ env:
   GP_CARS: ${{ inputs.cars }}
   GP_EVENTS: ${{ inputs.events }}
   GP_FORMA_REF: ${{ inputs.forma_ref }}
+  GP_RECIPE_COHORT: ${{ inputs.recipe_cohort }}
 
 jobs:
   campaign:

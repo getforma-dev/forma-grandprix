@@ -61,8 +61,8 @@ npm run gp -- compare BASELINE_RUN_ID CURRENT_RUN_ID
 ```
 
 `current` resolves to the **exact** source commit in `config/laboratory.json` and
-is recorded in the plan. Server candidate mode substitutes Rust crates while
-retaining the frozen app/compiler and external dependency controls. Client mode
+is recorded in the plan. The default frozen server cohort substitutes Rust crates
+while retaining the frozen app/compiler and external dependency controls. Client mode
 compares the pinned published core to the exact candidate and verifies its
 external dependency graph. These are controlled component experiments, not a
 claim that every package in a complete current stack was rebuilt. A new complete
@@ -127,6 +127,14 @@ The [October 28 dependency audit](docs/dependency-audit-2026-10-28.json) disting
 frozen pins from available releases. Forma 3.2.0 is registered as the current
 candidate. Latest competitor majors have **not** been silently inserted into the
 Round 2 baseline. See [adapter contract](docs/ADAPTERS.md).
+
+After committing server-adapter updates, choose **Committed laboratory adapters**
+under **Competitor recipes** in the server study dialog. GitHub's equivalent input
+is `recipe_cohort=laboratory`. The default **Frozen historical controls** still
+uses the original source recipes. The chosen cohort and exact recipe commit are
+recorded separately from the Forma candidate revision; changing this selection
+does not upgrade packages automatically or turn a component study into a full
+3.2-stack measurement. Paired and compression controls remain frozen.
 
 ## Layout and historical ownership
 

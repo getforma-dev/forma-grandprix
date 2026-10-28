@@ -367,6 +367,8 @@ function identityRows(manifest) {
     ['Performance targets', original.performanceAcceptance?.status || 'Not separately recorded by this protocol version'],
     ['Suite / resource profile', `${original.config?.suite || 'recorded in raw evidence'} / ${original.config?.profile || 'recorded in raw evidence'}`],
     ['Laboratory commit', original.labSourceCommit || original.source?.commit || 'unrecorded; inspect original evidence'],
+    ['Adapter recipe cohort', original.config?.recipeCohort || original.plan?.recipeCohort || 'Not separately recorded by this protocol version; inspect the retained recipe identities'],
+    ['Adapter recipe source', original.recipeSource ? `${original.recipeSource.repository} @ ${original.recipeSource.commit} / ${original.recipeSource.path}` : 'See original manifest and adapter lockfiles'],
     ['Forma candidate commits', selected.length ? selected.join(', ') : 'No source override recorded; inspect the frozen package locks'],
     ['Observed at', original.startedAt || manifest.observedAt || 'unrecorded'],
     ['GitHub run / attempt', manifest.remote ? `${manifest.remote.runId || 'unrecorded'} / ${manifest.remote.runAttempt || manifest.remote.attempt || 'unrecorded'}` : 'Not a hosted import'],

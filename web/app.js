@@ -19,6 +19,7 @@ const eventNames = ['Sprint · render throughput','Endurance · sustained work',
 function openStudy(suite) {
   const specification = state.workflows[suite]; $('#suite-input').value = suite; $('#dialog-title').textContent = specification.title; $('#dialog-description').textContent = specification.description; $('#dispatch-error').textContent = '';
   let fields = '';
+  if (suite === 'server') fields += '<label class="field">Competitor recipes<select name="recipeCohort"><option value="frozen">Frozen historical controls</option><option value="laboratory">Committed laboratory adapters</option></select><small>Use committed laboratory adapters after reviewing and committing dependency updates. The exact recipe revision is retained. Forma source selection remains separate.</small></label>';
   if (suite === 'server' || suite === 'islands') fields += `<fieldset class="selection-group"><legend>Competitors <span class="subtle">Full grid selected</span></legend><div class="selection-grid">${state.config.suites[suite].cars.map(car => `<label class="check-line"><input type="checkbox" name="cars" value="${escape(car)}" checked><span>${escape(car)}</span></label>`).join('')}</div><small>Each selected implementation receives the same declared workload. A subset is retained as a partial study.</small></fieldset>`;
   if (suite === 'server') fields += `<fieldset class="selection-group"><legend>Workloads</legend><div class="selection-grid">${eventNames.map((event,index) => `<label class="check-line"><input type="checkbox" name="events" value="${index+1}" checked><span>${event}</span></label>`).join('')}</div></fieldset>`;
   if (suite !== 'islands') fields += `<label class="field">Exact Forma source ${['client','paired'].includes(suite)?'commits':'commit'}<textarea name="refs" rows="2" spellcheck="false" required>${escape(state.config.currentForma.sourceCommit)}</textarea><small>${['client','paired'].includes(suite)?'One to four exact 40-character commits, separated by commas. Published Forma control is included.':'A 40-character source commit. This never replaces the frozen historical control.'}</small></label>`;
@@ -29,7 +30,7 @@ function openStudy(suite) {
 $('#study-form').onsubmit = async event => {
   event.preventDefault(); const form = new FormData(event.target), suite = form.get('suite'); const input = { suite, diagnostic:form.get('mode') === 'diagnostic', autoImport:form.has('autoImport') };
   if (['server','islands'].includes(suite)) input.cars = form.getAll('cars');
-  if (suite === 'server') input.events = form.getAll('events').map(Number);
+  if (suite === 'server') { input.events = form.getAll('events').map(Number); input.recipeCohort = form.get('recipeCohort'); }
   if (['server','compression'].includes(suite)) input.formaRef = form.get('refs').trim();
   if (['client','paired'].includes(suite)) input.formaRefs = form.get('refs').trim();
   if (suite === 'client') { input.profileRows = form.has('profileRows'); input.compilerTemplates = form.has('compilerTemplates'); }

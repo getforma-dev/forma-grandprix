@@ -94,7 +94,8 @@ test('compression encodings are discovered as separate trials without a raw dire
 test('human report preserves original failure and separates lab and Forma commits after import', t => {
   const dir = fixture(t);
   write(dir, 'manifest.json', { ...manifest(), status: 'imported', remote: { runId: 123, attempt: 2, originalManifest: {
-    status: 'failed', quality: 'unqualified', labSourceCommit: 'a'.repeat(40), formaSourceCommits: ['b'.repeat(40)], config: { suite: 'server', profile: 'gha-4-v1' },
+    status: 'failed', quality: 'unqualified', labSourceCommit: 'a'.repeat(40), formaSourceCommits: ['b'.repeat(40)], config: { suite: 'server', profile: 'gha-4-v1', recipeCohort: 'laboratory' },
+    recipeSource: { kind: 'laboratory', repository: 'getforma-dev/forma-grandprix', commit: 'a'.repeat(40), path: 'contestants' },
   } } });
   generateReport(dir);
   const output = fs.readFileSync(path.join(dir, 'report.md'), 'utf8');
@@ -102,6 +103,8 @@ test('human report preserves original failure and separates lab and Forma commit
   assert(output.includes('Laboratory commit:** ' + 'a'.repeat(40)));
   assert(output.includes('Forma candidate commits:** ' + 'b'.repeat(40)));
   assert(output.includes('123 / 2'));
+  assert(output.includes('Adapter recipe cohort:** laboratory'));
+  assert(output.includes('getforma-dev/forma-grandprix @ ' + 'a'.repeat(40) + ' / contestants'));
 });
 
 test('human reports retain qualified target misses separately from measurement validity', t => {

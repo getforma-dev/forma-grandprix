@@ -45,7 +45,7 @@ const exactRefs = (value, fallback) => {
   return values.join(',');
 };
 export function dispatchPlan(root, input) {
-  allowed(input, ['suite', 'cars', 'events', 'formaRef', 'formaRefs', 'profile', 'diagnostic', 'workflowRef', 'profileRows', 'compilerTemplates', 'autoImport']);
+  allowed(input, ['suite', 'cars', 'events', 'formaRef', 'formaRefs', 'profile', 'diagnostic', 'workflowRef', 'profileRows', 'compilerTemplates', 'autoImport', 'recipeCohort']);
   const suite = input.suite, workflow = WORKFLOWS[suite]; if (!workflow) throw Error('Unknown remote test suite');
   const cfg = config(root), diagnostic = input.diagnostic ?? false;
   if (typeof diagnostic !== 'boolean' || (input.autoImport !== undefined && typeof input.autoImport !== 'boolean')) throw Error('Diagnostic/import settings must be booleans');
@@ -54,6 +54,11 @@ export function dispatchPlan(root, input) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(workflowRef) || workflowRef.includes('..') || workflowRef.includes('//') || workflowRef.endsWith('/')) throw Error('Invalid workflow branch or tag');
   const requestId = 'local-' + randomUUID();
   const fields = { runner: 'ubuntu-24.04', profile, diagnostic: String(diagnostic), request_id: requestId };
+  if (suite === 'server') {
+    const cohort = input.recipeCohort ?? 'frozen';
+    if (!['frozen','laboratory'].includes(cohort)) throw Error('Choose frozen controls or committed laboratory adapters');
+    fields.recipe_cohort = cohort;
+  } else if (input.recipeCohort !== undefined) throw Error('Recipe cohort selection is supported only by the server suite');
   // The dashboard only offers the standard hosted four-CPU allocation. A native
   // eight-CPU host needs an explicitly administered runner outside this interface.
   if (profile !== 'gha-4-v1') throw Error('This control desk uses the hosted four-CPU profile. Configure a native runner through GitHub Actions.');

@@ -46,3 +46,10 @@ Updating current recipe files does not mutate that baseline. Published client
 pins remain experimental controls unless deliberately changed as a new cohort.
 Changes in clock, fixture, semantics or resource limits require a new protocol/test
 identity and rerunning every affected comparator; they are not comparable speedups.
+
+Hosted server runs make the same distinction through `recipe_cohort`: `frozen`
+is the unchanged default; `laboratory` uses committed adapters from the workflow's
+exact laboratory SHA. Select the latter after committing an update proposal,
+then inspect the retained recipe source and locks before interpreting the run.
+This switch is server-only; paired/compression controls stay frozen, while client
+and island drivers already archive their applicable laboratory adapters.
