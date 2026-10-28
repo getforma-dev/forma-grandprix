@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "forma-grand-prix-evidence-archive",
+  "publishedAt": "2026-10-28T14:23:48.577Z",
+  "observedAt": "2026-10-28T14:18:49.478Z",
+  "suite": "server",
+  "status": "completed",
+  "quality": "qualified",
+  "performanceAcceptance": {
+    "applicable": false,
+    "status": "not-applicable",
+    "reason": "Not applicable: requires Forma and server events 1,5,6,7.",
+    "onlyFailure": false
+  },
+  "remote": {
+    "repository": "getforma-dev/forma-grandprix",
+    "runId": "40703983055",
+    "attempt": "1",
+    "artifactId": "12823046827",
+    "artifactName": "grand-prix-server-40703983055-1",
+    "workflow": ".github/workflows/grand-prix.yml",
+    "conclusion": "success",
+    "url": "https://github.com/getforma-dev/forma-grandprix/actions/runs/40703983055/attempts/1"
+  },
+  "source": {
+    "laboratoryCommit": "ce9e8005bc920390744f73dfad5759b03ce5ad53",
+    "formaCommits": [
+      "fc76ea8531f0e3a85d0224087384e41f52040e3c"
+    ],
+    "originalManifestSha256": "14bac1ac379018257b1a971a3110a6655d316130e3dd64158b16e20a9c19adb4",
+    "originalSealSha256": "8c1c4ae5201120ad559618c9896356d64a2a142557774dac1628d3fbea8cda8f"
+  },
+  "archive": {
+    "sha256": "960efadc131aa182c467c8bfdb1cc25d589a5d637bb145c0de5d105681a1c982",
+    "bytes": 1095734,
+    "format": "original-github-actions-zip"
+  },
+  "release": {
+    "id": 426709437,
+    "tag": "evidence-2026-10-28",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28",
+    "target": "79f3f58f6c6b9a0fad27a8926fc4b9044c20811e"
+  },
+  "asset": {
+    "id": 685240651,
+    "name": "grand-prix-server-40703983055-1-12823046827-960efadc131aa182c467c8bfdb1cc25d589a5d637bb145c0de5d105681a1c982.zip",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/download/evidence-2026-10-28/grand-prix-server-40703983055-1-12823046827-960efadc131aa182c467c8bfdb1cc25d589a5d637bb145c0de5d105681a1c982.zip"
+  },
+  "note": "Preserves the original attempt, including failures and diagnostic limits. Publication is not a new measurement or an endorsement of an improvement."
+}

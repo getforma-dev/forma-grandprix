@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "forma-grand-prix-evidence-archive",
+  "publishedAt": "2026-10-28T14:21:15.008Z",
+  "observedAt": "2026-10-28T13:56:48.577Z",
+  "suite": "server",
+  "status": "failed",
+  "quality": "unqualified",
+  "performanceAcceptance": {
+    "applicable": true,
+    "status": "unverified",
+    "error": "No authenticated driver completion receipt",
+    "onlyFailure": false
+  },
+  "remote": {
+    "repository": "getforma-dev/forma-grandprix",
+    "runId": "40701107577",
+    "attempt": "1",
+    "artifactId": "12822324016",
+    "artifactName": "grand-prix-server-40701107577-1",
+    "workflow": ".github/workflows/grand-prix.yml",
+    "conclusion": "failure",
+    "url": "https://github.com/getforma-dev/forma-grandprix/actions/runs/40701107577/attempts/1"
+  },
+  "source": {
+    "laboratoryCommit": "1b1c9d01a248b5f7ddaa31a36e8e80c0a104807f",
+    "formaCommits": [
+      "fc76ea8531f0e3a85d0224087384e41f52040e3c"
+    ],
+    "originalManifestSha256": "21df965fa2cd17bad202a6790b47f8caf755d3dadb51883e24204a7bf9f23153",
+    "originalSealSha256": "8eb5d3518f31e036afb34a3c69d4639f3f259c4c6c2c45f985f67fd746ff11b4"
+  },
+  "archive": {
+    "sha256": "7797a4271ec11fc33643871f2ff5c64027c973b6b6d4cc52b39e717a3d249f39",
+    "bytes": 9704723,
+    "format": "original-github-actions-zip"
+  },
+  "release": {
+    "id": 426709437,
+    "tag": "evidence-2026-10-28",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28",
+    "target": "79f3f58f6c6b9a0fad27a8926fc4b9044c20811e"
+  },
+  "asset": {
+    "id": 685233907,
+    "name": "grand-prix-server-40701107577-1-12822324016-7797a4271ec11fc33643871f2ff5c64027c973b6b6d4cc52b39e717a3d249f39.zip",
+    "url": "https://github.com/getforma-dev/forma-grandprix/releases/download/evidence-2026-10-28/grand-prix-server-40701107577-1-12822324016-7797a4271ec11fc33643871f2ff5c64027c973b6b6d4cc52b39e717a3d249f39.zip"
+  },
+  "note": "Preserves the original attempt, including failures and diagnostic limits. Publication is not a new measurement or an endorsement of an improvement."
+}
