@@ -37,6 +37,9 @@ committing a changed protocol or adapter.
 
 ## Run and review
 
+Read the [first independent campaign findings](docs/COMMISSIONING-2026-10-28.md) for
+measured gains, remaining gaps and their uncertainty.
+
 For hosted runs, use the [GitHub Actions guide](docs/RUNNING-ON-GITHUB.md). It gives
 the qualified four-CPU inputs and explains why PR checks remain diagnostic.
 
@@ -147,3 +150,13 @@ is `baseline-source.json`. Original `PROTOCOL.md`, `ROUND-2.md`, evidence, and
 legacy scoring/report tools remain for reproduction; new work uses the laboratory
 CLI and its [methodology](docs/METHODOLOGY.md). Historical results keep their
 original meaning. Audit: [2026-10-28](docs/AUDIT-2026-10-28.md).
+
+## Durable publication without repository bloat
+
+Use `npm run gp -- archive RUN_ID` to review a publication plan for a verified
+GitHub import. Add `--publish` to retain its exact original ZIP as a uniquely
+identified release asset and write a small immutable `evidence/catalog/` record.
+Commit that catalog record so other reviewers can find the archive and verify its
+SHA-256. Publication keeps the original outcome and qualification, including
+failures. It does not rerun or improve a measurement. The control panel lists
+published archives alongside the local evidence library.

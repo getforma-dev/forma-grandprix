@@ -77,10 +77,17 @@ panel's report and evidence links read this retained copy; they do not depend on
 expiring download URLs. Report regeneration is a derived view, not a new campaign.
 
 Artifacts expire after **30 days**. Sync before expiry and back up `runs/`; local
-run history is deliberately ignored by Git. Publish selected reviewed evidence
-explicitly under `evidence/` with original ZIP/digest and source references, or
-retain it in a durable archive. Keep the before/after rationale and accepted costs
-in `config/change-ledger.json`. Do not overwrite historical controls.
+run history is deliberately ignored by Git. Review `npm run gp -- archive RUN_ID`,
+then add `--publish` to preserve the exact ZIP as a durable GitHub release asset.
+Commit the small `evidence/catalog/` record, which binds its digest and source
+references to the original outcome. Keep the before/after rationale and accepted
+costs in `config/change-ledger.json`. Do not overwrite historical controls.
+
+Performance targets and measurement validity are separate. A complete server
+campaign can retain qualified evidence while failing CI for a missed target, but
+only when its authenticated execution record proves that the target miss was the
+sole failure. Missing measurements, source changes, failed correctness or cleanup
+still prevent qualification. Older attempts retain their original classifications.
 
 Cleanup remains run-owned. Disposable dependency/build output is removed before
 publication; original observations, source and lock identities, logs, readable

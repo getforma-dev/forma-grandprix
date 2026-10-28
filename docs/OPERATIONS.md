@@ -23,9 +23,11 @@ remove their own images/builder when done. The app's `cleanup --docker` also req
 that exact receipt; it never deletes unowned resources or shared base images.
 
 No automatic age-based deletion of scientific evidence. Keep the original ZIP,
-its SHA-256, run manifest, report and lineage link when promoting a result into
-version control. CI upload-artifact retention is currently 30 days; import/archive
-meaningful campaigns before expiry. The retained Round 2 archive is already in Git.
+its SHA-256, run manifest, report and lineage link. For new publications, review
+`npm run gp -- archive RUN_ID`, then add `--publish`: the exact ZIP becomes a
+release asset and only its compact `evidence/catalog/` record goes into Git.
+CI upload-artifact retention is currently 30 days; import/archive meaningful
+campaigns before expiry. The frozen Round 2 archive remains in Git unchanged.
 Do not commit regenerated dependencies/builds or copy the full repository into a
 result archive. Log growth and retained source snapshots are visible in disk usage;
 compression/export policy can be revised without changing measurements.

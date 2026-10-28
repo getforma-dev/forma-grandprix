@@ -25,6 +25,44 @@ export async function controlDoctor(root, command = runCommand) {
   checks.push({ name: 'Local signals dependencies (optional)', ok: fs.existsSync(path.join(root,'signals-race/node_modules/@getforma/core/package.json')), optional: true, detail: 'Only needed for the local diagnostic. Install explicitly: npm ci --prefix signals-race --ignore-scripts' });
   return { ok: checks.every(check => check.ok || check.optional), checks, note: 'Hosted measurements run on Linux in GitHub Actions; Docker and Linux are not required to use this local control desk.' };
 }
+// Validate only the public catalog envelope here. Publication and downloaded
+// archive authentication remain the responsibility of the archive/import tools.
+export function readControlCatalog(root) {
+  const catalog = [], catalogErrors = [];
+  let directory, names;
+  try {
+    directory = safePath(root, 'evidence/catalog');
+    if (!fs.existsSync(directory)) return { catalog, catalogErrors };
+    names = fs.readdirSync(directory).filter(name => name.endsWith('.json')).sort();
+  } catch (error) { return { catalog, catalogErrors: [{ path: 'evidence/catalog', error: error.message }] }; }
+  for (const name of names) {
+    try {
+      const file = safePath(directory, name), stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > 128 * 1024) throw Error('Catalog record must be a regular JSON file no larger than 128 KiB');
+      const record = readJSON(file), require = (valid, message) => { if (!valid) throw Error(message); };
+      const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+      const text = value => typeof value === 'string' && value.length > 0 && value.length <= 256;
+      const id = value => (typeof value === 'string' || Number.isSafeInteger(value)) && /^[1-9]\d{0,19}$/.test(String(value));
+      const sha = (value, length) => typeof value === 'string' && new RegExp('^[a-f0-9]{' + length + '}$').test(value);
+      require(object(record) && record.schemaVersion === 1 && record.kind === 'forma-grand-prix-evidence-archive', 'Unsupported catalog schema');
+      require(Object.hasOwn(WORKFLOWS, record.suite) && text(record.status) && text(record.quality), 'Invalid catalog suite or outcome');
+      require(typeof record.observedAt === 'string' && Number.isFinite(Date.parse(record.observedAt)), 'Invalid observation timestamp');
+      const { remote, archive, asset, release, source } = record;
+      require(object(remote) && remote.repository === REPOSITORY && id(remote.runId) && id(remote.artifactId) && id(remote.attempt), 'Invalid catalog remote identity');
+      require(name === `${remote.runId}-${remote.attempt}-${remote.artifactId}.json`, 'Catalog filename differs from its remote identity');
+      require([`https://github.com/${REPOSITORY}/actions/runs/${remote.runId}`, `https://github.com/${REPOSITORY}/actions/runs/${remote.runId}/attempts/${remote.attempt}`].includes(remote.url), 'Invalid catalog workflow URL');
+      require(object(archive) && sha(archive.sha256, 64) && Number.isSafeInteger(archive.bytes) && archive.bytes > 0 && archive.format === 'original-github-actions-zip', 'Invalid archive hash, size or format');
+      require(object(source) && sha(source.laboratoryCommit, 40) && Array.isArray(source.formaCommits) && source.formaCommits.every(commit => sha(commit, 40)) && sha(source.originalManifestSha256, 64) && sha(source.originalSealSha256, 64), 'Invalid catalog source identity');
+      require(object(release) && id(release.id) && typeof release.tag === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(release.tag), 'Invalid catalog release identity');
+      require(release.url === `https://github.com/${REPOSITORY}/releases/tag/${release.tag}`, 'Invalid catalog release URL');
+      require(object(asset) && id(asset.id) && typeof asset.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}\.zip$/.test(asset.name), 'Invalid catalog asset identity');
+      require(asset.url === `https://github.com/${REPOSITORY}/releases/download/${release.tag}/${asset.name}`, 'Invalid catalog asset URL');
+      catalog.push(record);
+    } catch (error) { catalogErrors.push({ path: 'evidence/catalog/' + name, error: error.message }); }
+  }
+  catalog.sort((a,b) => b.observedAt.localeCompare(a.observedAt));
+  return { catalog, catalogErrors };
+}
 function taskView(task) { return { ...task }; }
 export async function startControlServer({ root = ROOT, port = 4317, github = createGitHub(root), command = runCommand, open = false } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw Error('Invalid local port');
@@ -89,10 +127,11 @@ export async function startControlServer({ root = ROOT, port = 4317, github = cr
         if (request.headers.origin !== `http://${host}` || typeof token !== 'string' || token.length !== csrf.length || !timingSafeEqual(Buffer.from(token), Buffer.from(csrf))) { json(response, 403, { error: 'Reload the local control page before making changes.' }); return; }
       } else if (request.method !== 'GET' && request.method !== 'HEAD') { json(response, 405, { error: 'Method not supported' }); return; }
       if (request.method === 'GET' && url.pathname === '/api/state') {
+        const { catalog, catalogErrors } = readControlCatalog(root);
         const records = history(root).map(m => ({ id: m.id, status: m.status, quality: m.quality, originalStatus: m.originalStatus || m.remote?.originalManifest?.status, originalQuality: m.originalQuality || m.remote?.originalManifest?.quality, suite: m.config?.suite || m.plan?.suite || 'archive', startedAt: m.observedAt || m.startedAt,
-          importedAt: m.importedAt, remote: m.remote ? { runId: m.remote.runId, url: m.remote.url, conclusion: m.remote.conclusion, attempt: m.remote.attempt } : null,
+          importedAt: m.importedAt, performanceAcceptance: m.remote?.originalManifest?.performanceAcceptance || m.performanceAcceptance || null, remote: m.remote ? { runId: m.remote.runId, url: m.remote.url, conclusion: m.remote.conclusion, attempt: m.remote.attempt } : null,
           report: `/runs/${encodeURIComponent(m.id)}/report.html`, source: m.source?.commit || m.plan?.formaRef || null, cleanup: m.cleanup }));
-        json(response, 200, { csrf, config: config(root), workflows: WORKFLOWS, account, history: records, active: fs.existsSync(safePath(root, '.grandprix/active.json')) ? readJSON(safePath(root, '.grandprix/active.json')) : null,
+        json(response, 200, { csrf, config: config(root), workflows: WORKFLOWS, account, history: records, catalog, catalogErrors, active: fs.existsSync(safePath(root, '.grandprix/active.json')) ? readJSON(safePath(root, '.grandprix/active.json')) : null,
           tasks: [...tasks.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 40).map(taskView), remote, localUrl: `http://127.0.0.1:${address.port}` }); return;
       }
       if (request.method === 'GET' && url.pathname === '/api/ledger') { json(response, 200, readJSON(path.join(root, 'config/change-ledger.json'))); return; }

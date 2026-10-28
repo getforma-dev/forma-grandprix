@@ -54,3 +54,20 @@ test('restart marks unfinished control operations interrupted and never replays 
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'gp-control-restart-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const id='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';writeJSON(path.join(root,'.grandprix/control-tasks',id+'.json'),{id,kind:'dispatch',status:'running',createdAt:'2026-10-20'});let calls=0;
  const app=await startControlServer({root,port:0,github:{account:async()=>({connected:false}),runs:async()=>{calls++;return[];}}});await app.accountReady;const task=await(await fetch(app.url+'/api/tasks/'+id)).json();assert.equal(task.status,'interrupted');assert.equal(calls,0);await app.close();
 });
+function catalogRecord(runId=123){
+ const repository='getforma-dev/forma-grandprix',tag='evidence-'+runId,name='grand-prix-server-'+runId+'-1.zip';
+ return{schemaVersion:1,kind:'forma-grand-prix-evidence-archive',observedAt:'2026-10-28T12:00:00Z',publishedAt:'2026-10-28T13:00:00Z',suite:'server',status:'failed',quality:'qualified',remote:{repository,runId:String(runId),attempt:'1',artifactId:'456',url:`https://github.com/${repository}/actions/runs/${runId}/attempts/1`},archive:{sha256:'a'.repeat(64),bytes:1000,format:'original-github-actions-zip'},source:{laboratoryCommit:'a'.repeat(40),formaCommits:['b'.repeat(40)],originalManifestSha256:'c'.repeat(64),originalSealSha256:'d'.repeat(64)},release:{id:789,tag,url:`https://github.com/${repository}/releases/tag/${tag}`},asset:{id:987,name,url:`https://github.com/${repository}/releases/download/${tag}/${name}`}};
+}
+test('a malformed catalog record cannot take down good archives or retained history',async t=>{
+ const f=await fixture(t);f.put('evidence/catalog/123-1-456.json',catalogRecord());f.put('evidence/catalog/124-1-456.json','{invalid json');
+ const response=await fetch(f.app.url+'/api/state');assert.equal(response.status,200);const state=await response.json();assert.equal(state.catalog.length,1);assert.equal(state.catalog[0].remote.runId,'123');assert.equal(state.history[0].id,'kept');assert.equal(state.history[0].originalStatus,'failed');assert.equal(state.catalogErrors.length,1);assert.equal(state.catalogErrors[0].path,'evidence/catalog/124-1-456.json');assert(state.catalogErrors[0].error);
+});
+test('public catalog envelope rejects missing identity, unsafe URLs, bad hashes and sizes independently',async t=>{
+ const f=await fixture(t);const changes=[r=>r.schemaVersion=2,r=>delete r.remote,r=>r.remote.runId='different',r=>r.asset.url='javascript:alert(1)',r=>r.remote.url='https://github.com/other/repo/actions/runs/123',r=>r.archive.sha256='short',r=>r.archive.bytes=-1,r=>r.archive.bytes='100',r=>r.source.formaCommits=[null],r=>delete r.release,r=>r.observedAt='nonsense'];
+ changes.forEach((change,index)=>{const record=catalogRecord(200+index);change(record);f.put(`evidence/catalog/${200+index}-1-456.json`,record);});f.put('evidence/catalog/123-1-456.json',catalogRecord());
+ const state=await f.get('/api/state');assert.equal(state.catalog.length,1);assert.equal(state.catalogErrors.length,changes.length);assert.equal(state.history.length,1);assert(state.catalogErrors.every(error=>error.path&&error.error));
+});
+test('catalog filesystem problems are reported without breaking the control state',async t=>{
+ const f=await fixture(t);f.put('evidence/catalog/123-1-456.json',catalogRecord());fs.symlinkSync(path.join(f.root,'config/laboratory.json'),path.join(f.root,'evidence/catalog/124-1-456.json'));const state=await f.get('/api/state');assert.equal(state.catalog.length,1);assert.match(state.catalogErrors[0].error,/Symlink refused/);
+ fs.rmSync(path.join(f.root,'evidence/catalog'),{recursive:true});fs.symlinkSync(path.join(f.root,'config'),path.join(f.root,'evidence/catalog'));const damaged=await f.get('/api/state');assert.equal(damaged.catalog.length,0);assert.equal(damaged.catalogErrors[0].path,'evidence/catalog');assert.equal(damaged.history.length,1);
+});

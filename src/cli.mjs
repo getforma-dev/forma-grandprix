@@ -29,6 +29,7 @@ Run from the Forma Grand Prix repository: npm run gp -- <command>
   report <run-id>                  Regenerate a verified run's readable report
   compare <baseline> <current>    Gate comparisons on protocol and campaign identity
   verify <run-id>                  Check retained evidence for changed/missing files
+  archive <run-id> [--publish]    Plan durable publication; publish exact ZIP and catalog
   recover <run-id> [--apply]       Recover a proven-dead local run; preserve its evidence
   cleanup <run-id> [--apply]      Preview cleanup (add --dependencies or --docker)
   updates                         Check current npm registry versions (read-only)
@@ -114,11 +115,16 @@ export async function executeRun(root,options) {
 }
 export async function main(argv=process.argv.slice(2),root=ROOT) {
   const [command='help',...rest]=argv,options=parseOptions(rest);
-  for(const flag of ['apply','dependencies','docker'])if(options[flag]!==undefined&&options[flag]!==true)throw Error('--'+flag+' does not take a value');
+  for(const flag of ['apply','dependencies','docker','publish'])if(options[flag]!==undefined&&options[flag]!==true)throw Error('--'+flag+' does not take a value');
   if(['help','--help','-h'].includes(command)){print(help);return 0;}
   if(command==='serve'){assertOptions(options,['port']);if(options._.length)throw Error('Unexpected arguments');const {startControlServer}=await import('./control-server.mjs');const app=await startControlServer({root,port:options.port===undefined?4317:Number(options.port)});print('Forma Grand Prix control desk: '+app.url);const stop=()=>void app.close();process.once('SIGINT',stop);process.once('SIGTERM',stop);return 0;}
   if(command==='dashboard'){assertOptions(options,[]);const {generateDashboard}=await import('./dashboard.mjs');print(generateDashboard(root));return 0;}
   if(command==='import-evidence'){assertOptions(options,['id']);if(options._.length!==1||!options.id)throw Error('Supply retained archive path and --id');print(importEvidence(root,options._[0],options.id));return 0;}
+  if(command==='archive') {
+    assertOptions(options,['publish']);if(options._.length!==1)throw Error('Supply one verified imported run ID');
+    const {archivePlan,publishArchive}=await import('./archive.mjs');
+    const plan=await archivePlan(root,options._[0]);print(options.publish?await publishArchive(root,plan):plan);return 0;
+  }
   if(command==='catalog'){assertOptions(options,[]);print(config(root));return 0;}
   if(command==='changes') {assertOptions(options,[]);const ledger=readLedger(path.join(root,'config/change-ledger.json'));print(renderChanges(ledger));return 0;}
   if(command==='plan'||command==='doctor'){const plan=makePlan(root,options);if(command==='plan'){print(plan);return 0;}const checks=preflight(root,plan);print(checks);return checks.ok?0:1;}

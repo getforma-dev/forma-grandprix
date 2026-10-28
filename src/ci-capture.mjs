@@ -2,11 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { ROOT, acquire, config, environment, readJSON, runPath, seal, sourceIdentity, writeJSON } from './session.mjs';
+import { ROOT, acquire, config, environment, hash, readJSON, runPath, safePath, seal, sourceIdentity, writeJSON } from './session.mjs';
 import { generateReport } from './report.mjs';
 import { planCleanup, applyCleanup } from './cleanup.mjs';
 import { planRecovery, applyRecovery } from './recovery.mjs';
+import { authenticatePhaseReceipt, BUDGET_FILES, PHASE_FILE } from '../harness/ci-run.mjs';
+import { evaluateBudgets } from '../harness/budgets.mjs';
 import { ensureFormaSource } from '../harness/forma-source.mjs';
 
 export const SUITES = ['server', 'client', 'islands', 'paired', 'compression'];
@@ -39,7 +43,7 @@ export function driverPlan(root, suite, env = process.env) {
   const refs = selectedRefs(suite, env);
   const runtimeEnv = { GP_PROFILE: profile, GP_DIAGNOSTIC: String(diagnostic) };
   const args = [];
-  let budgetCheck = { applicable: false, reason: 'This suite does not use server strength budgets.' };
+  let budgetCheck = { applicable: false, reason: 'No top-level server budget evaluation for this suite; inspect per-trial records.' };
   const allowedCars = config(root).suites[suite]?.cars;
   if (allowedCars && env.GP_CARS && env.GP_CARS !== 'all' && env.GP_CARS.split(',').some(car => !allowedCars.includes(car))) throw Error('Unknown selected competitor');
   if (['server', 'compression'].includes(suite)) {
@@ -113,7 +117,9 @@ export async function captureAttempt(root, suite, env = process.env) {
     const plan = driverPlan(root, suite, env);
     manifest.status = 'running'; manifest.plan = plan; writeJSON(file, manifest);
     fd = fs.openSync(logFile, 'wx');
-    const childEnv = { ...env, ...plan.env, GP_RESULTS_DIR: path.join(dir, 'artifacts') };
+    const phaseSecret = randomBytes(32).toString('hex');
+    const childEnv = { ...env, ...plan.env, GP_RESULTS_DIR: path.join(dir, 'artifacts'), GP_CI_PHASE_TOKEN: phaseSecret };
+    if (suite !== 'server') delete childEnv.GP_CI_PHASE_TOKEN;
     for (const key of ['GP_RAW_DIR', 'GP_OUT', 'GP_CAMPAIGN_FILE', 'GP_CAMPAIGN_JSON', 'GP_RESOURCE_PROFILE', 'GP_IMAGE_PREFIX', 'GP_ACCEPT_ENCODING']) delete childEnv[key];
     code = await new Promise((resolve, reject) => {
       release.update({ phase: 'starting-worker' });
@@ -128,12 +134,38 @@ export async function captureAttempt(root, suite, env = process.env) {
       child.once('error', error => { clear(); reject(error); });
       child.once('close', status => { clear(); resolve(status ?? 1); });
     });
+    if (suite === 'server' && plan.budgetCheck.applicable) {
+      try { manifest.executionPhases = authenticatePhaseReceipt(safePath(dir, 'artifacts/' + PHASE_FILE), phaseSecret, manifest.id); }
+      catch (error) { manifest.executionPhaseError = error.message; }
+    }
     manifest.exitCode = code; manifest.status = manifest.interrupted ? 'interrupted' : code === 0 ? 'completed' : 'failed';
     manifest.sourceAfter = sourceIdentity(root).sourceHash;
     if (manifest.sourceAfter !== manifest.source.sourceHash) { manifest.status = 'invalid'; manifest.error = 'Laboratory inputs changed during execution'; code = 1; }
   } catch (error) { manifest.status = 'failed'; manifest.error = error.message; code = 1; }
   finally { if (fd !== undefined) fs.closeSync(fd); manifest.finishedAt = new Date().toISOString(); writeJSON(file, manifest); release(); }
   return code;
+}
+// Budget acceptance is a separate scientific question from measurement validity.
+// A phase receipt proves the driver completed before the acceptance tool ran;
+// its retained inputs and result are recomputed, never trusted as a pass/fail bit.
+export function performanceAcceptance(dir, manifest) {
+  if (manifest.config?.suite !== 'server' || !manifest.plan?.budgetCheck?.applicable) return { applicable: false, status: 'not-applicable', reason: manifest.plan?.budgetCheck?.reason || 'Server strength budgets were not selected.' };
+  try {
+    const phase = manifest.executionPhases;
+    assert(phase && !manifest.executionPhaseError, 'No authenticated driver completion receipt');
+    assert.equal(phase.runId, manifest.id); assert.equal(phase.driverExitCode, 0);
+    assert.equal(phase.budget?.applicable, true); assert.equal(phase.budget.signal, null); assert.equal(phase.budget.error, null);
+    assert([0, 1].includes(phase.budget.exitCode)); assert.equal(phase.budget.exitCode, manifest.exitCode);
+    assert.equal(hash(fs.readFileSync(safePath(dir, 'artifacts/' + PHASE_FILE))), phase.receiptSha256, 'Phase receipt changed after capture');
+    for (const file of BUDGET_FILES) assert.equal(hash(fs.readFileSync(safePath(dir, 'artifacts/' + file))), phase.files?.[file], 'Budget input changed: ' + file);
+    const records = Object.fromEntries(['sprint', 'fuel', 'grid', 'weight'].map(event => [event, readJSON(safePath(dir, `artifacts/raw/${event}/forma.json`))]));
+    const result = evaluateBudgets(records), saved = readJSON(safePath(dir, 'artifacts/raw/forma-budgets.json'));
+    assert.deepEqual(saved, result, 'Stored budgets differ from recomputed unchanged thresholds');
+    assert.equal(phase.budget.exitCode, result.passed ? 0 : 1, 'Budget exit does not match recomputed acceptance');
+    return { applicable: true, status: result.passed ? 'met' : 'missed', evidence: 'artifacts/raw/forma-budgets.json', phaseReceipt: 'artifacts/' + PHASE_FILE,
+      measured: result.measured, limits: result.limits, checks: result.checks, diagnostic: result.diagnostic,
+      explanation: 'Performance acceptance is separate from evidence qualification. Missing a target is retained as an acceptance failure.' };
+  } catch (error) { return { applicable: true, status: 'unverified', error: error.message }; }
 }
 export async function finishAttempt(root, suite, env = process.env) {
   const dir = runPath(root, env.GP_RUN_ID), file = path.join(dir, 'manifest.json');
@@ -168,7 +200,16 @@ export async function finishAttempt(root, suite, env = process.env) {
     fs.writeFileSync(path.join(dir, 'report.md'), `# Forma Grand Prix — retained failed attempt\n\nReport generation failed: ${error.message}\n\nRaw evidence and the manifest remain available.\n`);
     fs.writeFileSync(path.join(dir, 'report.html'), '<!doctype html><html lang="en"><meta charset="utf-8"><title>Forma Grand Prix — retained failure</title><h1>Retained failed attempt</h1><p>The report could not be generated. Inspect manifest.json and raw artifacts.</p></html>');
   }
-  manifest.quality = manifest.mode === 'diagnostic' ? 'diagnostic' : manifest.status === 'completed' && report?.measurements.length && report.measurements.every(m => m.qualification === 'qualified' && (m.status === 'measured' || (m.status === 'unavailable' && m.required === false))) ? 'qualified' : 'unqualified';
+  manifest.performanceAcceptance = performanceAcceptance(dir, manifest);
+  const validEvidence = report?.measurements.length && report.measurements.every(m => m.qualification === 'qualified' && (m.status === 'measured' || (m.status === 'unavailable' && m.required === false)));
+  const budgetOnlyFailure = manifest.status === 'failed' && manifest.exitCode === 1 && manifest.performanceAcceptance.status === 'missed'
+    && manifest.performanceAcceptance.diagnostic === false && !manifest.interrupted && !manifest.error && !manifest.recoveryError && !manifest.reportError
+    && manifest.sourceAfter === manifest.source.sourceHash && sourceIdentity(root).sourceHash === manifest.sourceAfter
+    && validEvidence && manifest.cleanup?.completed === true && env.GP_WORKFLOW_STATUS === 'failure'
+    && env.GP_MEASUREMENT_OUTCOME === 'failure' && env.GP_DOCKER_CLEANUP_OUTCOME === 'success';
+  manifest.performanceAcceptance.onlyFailure = budgetOnlyFailure;
+  manifest.workflowOutcomes = { measurement: env.GP_MEASUREMENT_OUTCOME || null, dockerCleanup: env.GP_DOCKER_CLEANUP_OUTCOME || null };
+  manifest.quality = manifest.mode === 'diagnostic' ? 'diagnostic' : (manifest.status === 'completed' || budgetOnlyFailure) && manifest.cleanup?.completed === true && validEvidence ? 'qualified' : 'unqualified';
   manifest.workflowStatus = env.GP_WORKFLOW_STATUS || null; writeJSON(file, manifest);
   if (!manifest.reportError) generateReport(dir);
   seal(dir);

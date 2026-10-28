@@ -104,6 +104,22 @@ test('human report preserves original failure and separates lab and Forma commit
   assert(output.includes('123 / 2'));
 });
 
+test('human reports retain qualified target misses separately from measurement validity', t => {
+  const dir = fixture(t);
+  write(dir, 'manifest.json', { ...manifest(), status: 'imported', remote: { originalManifest: {
+    status: 'failed', quality: 'qualified', performanceAcceptance: { applicable: true, status: 'missed', onlyFailure: true,
+      checks: [{ metric: 'peakMiB', measured: 8.01, limit: 8, passed: false }] },
+  } } });
+  generateReport(dir);
+  for (const filename of ['report.md', 'report.html']) {
+    const output = fs.readFileSync(path.join(dir, filename), 'utf8');
+    assert(output.includes('failed · qualified'));
+    assert(output.includes('Performance target acceptance'));
+    assert(output.includes('8.01 measured; maximum 8; missed'));
+    assert(output.includes('Complete verified measurements remain qualified'));
+  }
+});
+
 test('different campaigns and unlike batching semantics never produce ratios', t => {
   const dir = fixture(t);
   write(dir, 'raw/signals/forma.json', { correct: true, runs: 3, campaign, benches: { batch: { runs: [10, 12, 14] } } });

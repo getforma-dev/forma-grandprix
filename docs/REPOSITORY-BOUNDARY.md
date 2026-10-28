@@ -50,8 +50,9 @@ explicitly labeled and never become qualified hosted comparisons.
 Original archives, raw observations, readable reports and integrity records stay
 with each imported run. GitHub artifacts are temporary transport, not a permanent
 archive. Sync completed runs before artifact expiry and back up the ignored `runs/`
-directory. Deliberately reviewed publications can be retained in `evidence/` with
-their original archive digest and source identity. Never commit generated build
+directory. Deliberately reviewed publications use exact original ZIP release
+assets and small versioned `evidence/catalog/` records with their archive digests
+and source identities. Never commit generated build
 trees, dependency directories, source caches or credentials.
 
 ## Coverage and claim boundaries

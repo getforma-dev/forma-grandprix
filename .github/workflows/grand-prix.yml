@@ -77,14 +77,18 @@ jobs:
       - name: Prepare exact framework sources separately from laboratory source
         run: node src/ci-capture.mjs prepare server 2>&1 | tee -a "runs/$GP_RUN_ID/setup.log"
       - name: Run requested measurements sequentially
+        id: measurement
         run: node src/ci-capture.mjs run server
       - name: Remove only this attempt's Docker resources
+        id: docker_cleanup
         if: always()
         run: node harness/cleanup.mjs 2>&1 | tee -a "runs/$GP_RUN_ID/cleanup.log"
       - name: Compact generated outputs and seal human and machine reports
         if: always()
         env:
           GP_WORKFLOW_STATUS: ${{ job.status }}
+          GP_MEASUREMENT_OUTCOME: ${{ steps.measurement.outcome }}
+          GP_DOCKER_CLEANUP_OUTCOME: ${{ steps.docker_cleanup.outcome }}
         run: |
           node src/ci-capture.mjs finish server
           cat "runs/$GP_RUN_ID/report.md" >> "$GITHUB_STEP_SUMMARY"

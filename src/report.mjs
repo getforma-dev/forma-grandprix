@@ -227,7 +227,7 @@ function series(event, raw) {
   }
   if (event === 'weight') {
     add('image', 'Runtime image', raw.parts?.image?.values);
-    add('gzip', 'Response · gzip level 9', raw.parts?.gzip?.values);
+    add('gzip', 'Response · offline gzip level 9 (not wire size)', raw.parts?.gzip?.values);
     add('response', 'Response · uncompressed', raw.parts?.gzip?.rawBytes === undefined ? null : [raw.parts.gzip.rawBytes]);
     return out;
   }
@@ -364,6 +364,7 @@ function identityRows(manifest) {
   const selected = original.formaSourceCommits || original.plan?.formaRefs || (original.plan?.formaRef ? [original.plan.formaRef] : []);
   return [
     ['Measurement status', `${original.status || 'unrecorded'} · ${original.quality || 'qualification unrecorded'}`],
+    ['Performance targets', original.performanceAcceptance?.status || 'Not separately recorded by this protocol version'],
     ['Suite / resource profile', `${original.config?.suite || 'recorded in raw evidence'} / ${original.config?.profile || 'recorded in raw evidence'}`],
     ['Laboratory commit', original.labSourceCommit || original.source?.commit || 'unrecorded; inspect original evidence'],
     ['Forma candidate commits', selected.length ? selected.join(', ') : 'No source override recorded; inspect the frozen package locks'],
@@ -373,11 +374,22 @@ function identityRows(manifest) {
   ];
 }
 
+function acceptanceRows(manifest) {
+  const acceptance = (manifest.remote?.originalManifest || manifest).performanceAcceptance;
+  if (!acceptance) return [];
+  return [
+    ['Outcome', acceptance.status],
+    ['Interpretation', acceptance.onlyFailure ? 'The workflow failed only because a performance target was missed. Complete verified measurements remain qualified; the missed target remains a failure.' : acceptance.explanation || acceptance.reason || acceptance.error || 'See measurement qualification separately.'],
+    ...(acceptance.checks || []).map(check => [check.metric, `${fmt(check.measured)} measured; maximum ${fmt(check.limit)}; ${check.passed ? 'met' : 'missed'}`]),
+  ];
+}
+
 function toMarkdown(report) {
   const lines = [
     '# Forma Grand Prix · Engineering evidence', '', `Run: **${md(report.runId)}** · Status: **${md(report.status)}**`, '', report.interpretation, '',
     `[Machine-readable report](report.json) · [Measurement table](measurements.csv)${report.manifestAvailable ? ' · [Run manifest](manifest.json)' : ''}`, '',
     '## Run identity and scope', '', ...identityRows(report.manifest).map(([label, value]) => `- **${md(label)}:** ${md(value)}`), '',
+    ...(acceptanceRows(report.manifest).length ? ['## Performance target acceptance', '', ...acceptanceRows(report.manifest).map(([label, value]) => `- **${md(label)}:** ${md(value)}`), ''] : []),
     '## Evidence quality', '', ...(report.warnings.length ? report.warnings.map(w => `- ${md(w)}`) : ['- Run provenance is available. Per-measurement caveats below still apply.']), '',
     'Mean and median summarize recorded samples. SD is sample standard deviation; CV = SD / mean. A single sample has no SD/CV. No outliers are discarded. Counts represent repetitions, not individual requests.', '',
     '## Forma observations', '', ...report.comparisons.map(c => `- ${md(findingText(c))}`), '',
@@ -397,6 +409,7 @@ function toMarkdown(report) {
 }
 
 function toHTML(report) {
+  const acceptance = acceptanceRows(report.manifest);
   const groups = Object.keys(EVENTS).filter(event => report.measurements.some(row => row.event === event));
   const sections = groups.map(event => {
     const rows = report.measurements.filter(row => row.event === event);
@@ -409,7 +422,7 @@ function toHTML(report) {
   const inventory = `<section><h2>Run identity and scope</h2><dl>${identityRows(report.manifest).map(([label, value]) => `<dt>${html(label)}</dt><dd>${html(value)}</dd>`).join('')}</dl></section><section><h2>Evidence inventory</h2><details><summary>${report.evidence.length} raw records · ${report.archives.length} unexpanded archives</summary><ul>${report.evidence.map(item => `<li><a href="${html(encodeURI(item.source))}">${html(item.source)}</a>${item.supported ? '' : ' · instrumentation record; no aggregate metric inferred'}</li>`).join('')}${report.archives.map(source => `<li><a href="${html(encodeURI(source))}">${html(source)}</a> · not expanded or remeasured</li>`).join('')}</ul></details></section>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Forma Grand Prix · ${html(report.runId)}</title><link rel="icon" href="data:,"/><style>
   :root{color-scheme:dark;--bg:#0c1322;--panel:#131e31;--ink:#eff5ff;--muted:#bdcce0;--accent:#6de3ce}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:1480px;margin:auto;padding:40px 24px 72px}header{border-top:5px solid var(--accent);padding:25px 0}h1{font-size:clamp(2rem,4vw,3.4rem);letter-spacing:-.04em;margin:.3em 0}h2{font-size:1.5rem}p{max-width:95ch;color:var(--muted);overflow-wrap:anywhere}a{color:var(--accent)}nav{display:flex;gap:16px;flex-wrap:wrap}section{margin-top:30px;padding:24px;background:var(--panel);border-radius:10px}table{width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums;font-size:.88rem}caption{text-align:left;padding:8px 0;color:var(--muted)}th,td{padding:12px 9px;border-bottom:1px solid #31415c;vertical-align:top}thead th{color:var(--accent)}td{white-space:nowrap}td:last-child{white-space:normal;min-width:180px}small{display:block;color:var(--muted)}summary{cursor:pointer}details p{font-size:.85rem;max-width:42ch}li{margin-bottom:12px}.table-scroll{overflow:auto}label{display:block;margin:20px 0}input{display:block;width:min(100%,450px);padding:12px;border:1px solid #6c819e;border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}.eyebrow{font-size:.85rem;font-weight:700;letter-spacing:.12em;color:var(--accent)}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}@media print{:root{color-scheme:light;--bg:white;--panel:white;--ink:black;--muted:#333;--accent:#075b4e}main{padding:0}section{padding:10px 0}input,label{display:none}details{display:block}.table-scroll{overflow:visible}table{font-size:8px}}
-  </style></head><body><main><header><div class="eyebrow">FORMA · PERFORMANCE LAB</div><h1>Grand Prix evidence</h1><p>Run <strong>${html(report.runId)}</strong> · ${html(report.status)}</p><p>${html(report.interpretation)}</p><nav aria-label="Report downloads"><a href="report.md">Readable Markdown</a><a href="measurements.csv">Measurements CSV</a><a href="report.json">Report JSON</a>${report.manifestAvailable ? '<a href="manifest.json">Run manifest</a>' : ''}</nav></header><section><h2>Evidence quality</h2><ul>${(report.warnings.length ? report.warnings : ['Run provenance is available. Read the per-measurement caveats before interpreting differences.']).map(w => `<li>${html(w)}</li>`).join('')}</ul><p>SD is sample standard deviation. CV is SD / mean. Single measurements have no SD/CV. Repetitions are the sample unit; individual requests are not independent samples. No outliers are removed and no significance test is claimed.</p></section><section><h2>Forma strengths and investigation opportunities</h2><p>These are descriptive workload observations. They do not establish broad framework superiority.</p><details><summary>Review ${report.comparisons.length + report.sourceComparisons.length} metric comparisons</summary><ul>${observations}</ul></details></section><label for="filter">Filter measurement rows<input id="filter" type="search" placeholder="e.g. forma, create1000, excluded"></label><nav aria-label="Events">${groups.map(event => `<a href="#${event}">${html(event)}</a>`).join('')}</nav>${sections}${inventory}<section><h2>Next investigations</h2><ol>${report.nextSteps.map(step => `<li>${html(step)}</li>`).join('')}</ol></section></main><script>document.getElementById('filter').addEventListener('input',function(){const q=this.value.toLowerCase();document.querySelectorAll('tbody tr').forEach(row=>{row.hidden=!row.textContent.toLowerCase().includes(q)})});</script></body></html>\n`;
+  </style></head><body><main><header><div class="eyebrow">FORMA · PERFORMANCE LAB</div><h1>Grand Prix evidence</h1><p>Run <strong>${html(report.runId)}</strong> · ${html(report.status)}</p><p>${html(report.interpretation)}</p><nav aria-label="Report downloads"><a href="report.md">Readable Markdown</a><a href="measurements.csv">Measurements CSV</a><a href="report.json">Report JSON</a>${report.manifestAvailable ? '<a href="manifest.json">Run manifest</a>' : ''}</nav></header><section><h2>Evidence quality</h2><ul>${(report.warnings.length ? report.warnings : ['Run provenance is available. Read the per-measurement caveats before interpreting differences.']).map(w => `<li>${html(w)}</li>`).join('')}</ul><p>SD is sample standard deviation. CV is SD / mean. Single measurements have no SD/CV. Repetitions are the sample unit; individual requests are not independent samples. No outliers are removed and no significance test is claimed.</p></section><section><h2>Forma strengths and investigation opportunities</h2><p>These are descriptive workload observations. They do not establish broad framework superiority.</p><details><summary>Review ${report.comparisons.length + report.sourceComparisons.length} metric comparisons</summary><ul>${observations}</ul></details></section><label for="filter">Filter measurement rows<input id="filter" type="search" placeholder="e.g. forma, create1000, excluded"></label><nav aria-label="Events">${groups.map(event => `<a href="#${event}">${html(event)}</a>`).join('')}</nav>${sections}${inventory}${acceptance.length ? `<section><h2>Performance target acceptance</h2><dl>${acceptance.map(([label, value]) => `<dt>${html(label)}</dt><dd>${html(value)}</dd>`).join('')}</dl></section>` : ''}<section><h2>Next investigations</h2><ol>${report.nextSteps.map(step => `<li>${html(step)}</li>`).join('')}</ol></section></main><script>document.getElementById('filter').addEventListener('input',function(){const q=this.value.toLowerCase();document.querySelectorAll('tbody tr').forEach(row=>{row.hidden=!row.textContent.toLowerCase().includes(q)})});</script></body></html>\n`;
 }
 
 function csvCell(value) {
