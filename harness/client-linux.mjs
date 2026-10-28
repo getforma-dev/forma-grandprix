@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import os from 'node:os';
 import { hostProfile, validateEngineProfile, validateContainerResources } from './resource-profile.mjs';
 import { SIGNAL_CONTROL, SIGNAL_RUNS, SIGNAL_WARMUPS, describeSignalControl, validateSignalControl } from './client-signals-control.mjs';
+import { ownClientTrial, compactClientTrial } from './client-trial-cleanup.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const laboratory = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8' }).trim();
@@ -81,6 +82,7 @@ try {
   ownership.builderCreated = true; writeFileSync(ownershipPath, JSON.stringify(ownership));
   for (const ref of ['published', ...refs]) {
     const trialDir = join(work, ref); mkdirSync(trialDir);
+    ownClientTrial(trialDir, { runId: id, ref, labSourceCommit, profileRows });
     mkdirSync(join(trialDir, 'harness'));
     cpSync(join(root, 'harness/resource-profile.mjs'), join(trialDir, 'harness/resource-profile.mjs'));
     cpSync(join(root, 'harness/campaign.mjs'), join(trialDir, 'harness/campaign.mjs'));
@@ -174,6 +176,7 @@ try {
     trial.after = machine(); trial.passed = true; save();
     await run('docker', ['image', 'rm', signalImage]);
     await run('docker', ['buildx', 'prune', '--builder', builder, '--all', '--force']);
+    if (!profileRows) { trial.cleanup = compactClientTrial(trialDir, { runId: id, ref, labSourceCommit }); save(); }
   }
   if (profileRows) {
     // All scored measurements finish first. These source-mapped captures are
@@ -193,6 +196,7 @@ try {
         else await run(process.execPath, args, client);
         report.rowProfiles.push({ ref: trial.ref, car, diagnostic: true }); save();
       }
+      trial.cleanup = compactClientTrial(join(work, trial.ref), { runId: id, ref: trial.ref, labSourceCommit, profileRows: true }); save();
     }
   }
   report.passed = true;

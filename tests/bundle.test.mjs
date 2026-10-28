@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { collectBundle, staticImports } from '../client-race/bundle-graph.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 function fixture(t, entries) {
@@ -79,4 +80,32 @@ test('bundle command retains failed evidence and refuses replacing it', t => {
   assert.match(record.error, /missing\.js/);
   assert.match(run().stderr, /Refusing to overwrite/);
   assert.equal(readFileSync(path.join(out, 'forma.json'), 'utf8'), raw);
+});
+test('bundle command retains exact file and uniquely indexed inline content digests', t => {
+  const f = fixture(t, {
+    'index.html': '<script type="module" src="main.js"></script><script>globalThis.one = 1;</script><script>globalThis.two = 2;</script>',
+    'main.js': 'export const value = 1;',
+  });
+  const client = path.join(f.folder, 'client-race'), harness = path.join(f.folder, 'harness');
+  mkdirSync(client); mkdirSync(harness);
+  for (const file of ['bundle.mjs', 'bundle-graph.mjs', 'lib.mjs']) copyFileSync(path.join(root, 'client-race', file), path.join(client, file));
+  for (const file of ['campaign.mjs', 'resource-profile.mjs']) copyFileSync(path.join(root, 'harness', file), path.join(harness, file));
+  const dist = path.join(client, 'apps/forma/dist'); mkdirSync(dist, { recursive: true });
+  for (const file of ['index.html', 'main.js']) copyFileSync(path.join(f.dist, file), path.join(dist, file));
+  const env = { ...process.env }; delete env.GP_CAMPAIGN_FILE;
+  const run = name => {
+    const out = path.join(f.folder, name), result = spawnSync(process.execPath, [path.join(client, 'bundle.mjs'), '--cars', 'forma', '--out', out], { env, encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(readFileSync(path.join(out, 'forma.json')));
+  };
+  const original = run('original'), repeated = run('repeated'), hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  assert.deepEqual(original.files, repeated.files, 'same payloads preserve deterministic evidence');
+  assert.equal(original.files.find(file => file.file === 'main.js').sha256, hash(readFileSync(path.join(dist, 'main.js'))));
+  const inline = original.files.filter(file => file.file === '(inline)');
+  assert.deepEqual(inline.map(file => file.inlineIndex), [0, 1]);
+  assert.deepEqual(inline.map(file => file.sha256), ['globalThis.one = 1;', 'globalThis.two = 2;'].map(hash));
+  writeFileSync(path.join(dist, 'main.js'), 'export const value = 2;');
+  const changed = run('changed');
+  assert.equal(original.bytes, changed.bytes, 'same-length content drift must still be identifiable');
+  assert.notEqual(original.files.find(file => file.file === 'main.js').sha256, changed.files.find(file => file.file === 'main.js').sha256);
 });

@@ -4,6 +4,7 @@ import { readCampaign } from '../harness/campaign.mjs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { appsDir, rawDir, parseArgs, builtCars } from './lib.mjs';
 import { validateProfile } from '../harness/resource-profile.mjs';
@@ -18,6 +19,8 @@ const cars = [...have, ...missing];
 for (const car of cars) if (existsSync(path.join(args.out, `${car}.json`))) throw new Error('Refusing to overwrite retained bundle result: ' + car);
 
 const br = (b) => brotliCompressSync(b, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: b.length } }).length;
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const part = (file, bytes) => ({ file, bytes: bytes.length, sha256: digest(bytes), gzip: gzipSync(bytes, { level: 9 }).length, brotli: br(bytes) });
 
 await mkdir(args.out, { recursive: true });
 let failed = 0;
@@ -28,10 +31,10 @@ for (const car of cars) {
   try {
     const dist = path.join(appsDir, car, 'dist');
     const { files, inlineSources } = await collectBundle(dist);
-    const parts = files.map(({ file, bytes }) => ({ file, bytes: bytes.length, gzip: gzipSync(bytes, { level: 9 }).length, brotli: br(bytes) }));
-    for (const source of inlineSources) {
+    const parts = files.map(({ file, bytes }) => part(file, bytes));
+    for (const [index, source] of inlineSources.entries()) {
       const bytes = Buffer.from(source);
-      parts.push({ file: '(inline)', bytes: bytes.length, gzip: gzipSync(bytes, { level: 9 }).length, brotli: br(bytes) });
+      parts.push({ ...part('(inline)', bytes), inlineIndex: index });
     }
     const sum = key => parts.reduce((total, part) => total + part[key], 0);
     Object.assign(result, { files: parts, bytes: sum('bytes'), gzip: sum('gzip'), brotli: sum('brotli'), status: 'passed', verified: true });

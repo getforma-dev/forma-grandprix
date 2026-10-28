@@ -15,7 +15,7 @@ import { importEvidence } from './import-evidence.mjs';
 
 const help=`Forma Grand Prix — a performance laboratory for improving Forma fairly
 
-Run from benchmarks/grand-prix: npm run gp -- <command>
+Run from the Forma Grand Prix repository: npm run gp -- <command>
 
   serve [--port 4317]             Open the dynamic local control desk
   catalog                         Suites, competitors and frozen/current versions

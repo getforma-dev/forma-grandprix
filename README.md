@@ -23,7 +23,8 @@ npm run gp -- doctor --suite server
 npm test
 ```
 
-`npm start` serves the live control panel at http://127.0.0.1:4317. It launches
+On macOS, double-click **Start Grand Prix.command** in this folder, or use
+`npm start`. Both serve the live control panel at http://127.0.0.1:4317. It launches
 remote GitHub campaigns, follows their status, and imports results into local history.
 GitHub authentication stays in the local server through your signed-in `gh` CLI.
 The lightweight local tools verify evidence, rebuild reports, and check prerequisites;
