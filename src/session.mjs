@@ -155,7 +155,7 @@ export function evidenceFiles(root) {
   return walk(root);
 }
 export function seal(runDir) {
-  const files=Object.fromEntries(evidenceFiles(runDir).filter(f=>!['integrity.json'].includes(path.basename(f))&&!f.endsWith('.tmp')).map(f=>[path.relative(runDir,f).split(path.sep).join('/'),hash(fs.readFileSync(f))]));
+  const files=Object.fromEntries(evidenceFiles(runDir).filter(f=>f!==path.join(runDir,'integrity.json')&&!f.endsWith('.tmp')).map(f=>[path.relative(runDir,f).split(path.sep).join('/'),hash(fs.readFileSync(f))]));
   writeJSON(path.join(runDir,'integrity.json'),{schemaVersion:1,algorithm:'sha256',files});
   return {files:Object.keys(files).length};
 }

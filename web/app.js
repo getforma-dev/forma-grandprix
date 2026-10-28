@@ -1,0 +1,74 @@
+const $ = selector => document.querySelector(selector);
+const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
+const number = value => typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : escape(value);
+const date = value => value ? new Date(value).toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'Not recorded';
+const badge = value => `<span class="status-pill badge ${['completed','qualified','imported','success','adopted'].includes(value) ? 'green' : ['failed','failure','blocked','invalid','interrupted'].includes(value) ? 'red' : ''}">${escape(value || 'pending')}</span>`;
+let state, ledger, toastTimer, taskMarkup = '', remoteMarkup = '';
+async function request(url, input) {
+  const response = await fetch(url, input ? { method:'POST', headers:{ 'Content-Type':'application/json', 'X-GrandPrix-CSRF':state.csrf }, body:JSON.stringify(input) } : {});
+  const data = await response.json(); if (!response.ok) throw Error(data.error || 'Request failed'); return data;
+}
+function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').hidden = true, 6500); }
+function link(url, label, classes = '') { const safe = /^(\/|https:\/\/github\.com\/)/.test(url || ''); return safe ? `<a class="${classes}" href="${escape(url)}" target="_blank" rel="noreferrer">${escape(label)} ↗</a>` : escape(label); }
+function renderSuites() {
+  const symbols = { server:'↯', client:'⌘', islands:'◉', paired:'⇄', compression:'⇣' };
+  $('#suite-cards').innerHTML = Object.entries(state.workflows).map(([key,suite],index) => `<button class="suite-card" data-suite="${key}"><span class="suite-top"><span class="suite-icon">${symbols[key]}</span><span class="suite-number">0${index+1}</span></span><h3>${escape(suite.title)}</h3><p>${escape(suite.description)}</p><span class="card-bottom">Configure study <span>↗</span></span></button>`).join('');
+  for (const button of document.querySelectorAll('[data-suite]')) button.onclick = () => openStudy(button.dataset.suite);
+}
+const eventNames = ['Sprint · render throughput','Endurance · sustained work','Multicore · scale behavior','Reaction · response latency','Fuel · memory','Grid · startup','Weight · build & payload','Pit stop · rebuild'];
+function openStudy(suite) {
+  const specification = state.workflows[suite]; $('#suite-input').value = suite; $('#dialog-title').textContent = specification.title; $('#dialog-description').textContent = specification.description; $('#dispatch-error').textContent = '';
+  let fields = '';
+  if (suite === 'server' || suite === 'islands') fields += `<fieldset class="selection-group"><legend>Competitors <span class="subtle">Full grid selected</span></legend><div class="selection-grid">${state.config.suites[suite].cars.map(car => `<label class="check-line"><input type="checkbox" name="cars" value="${escape(car)}" checked><span>${escape(car)}</span></label>`).join('')}</div><small>Each selected implementation receives the same declared workload. A subset is retained as a partial study.</small></fieldset>`;
+  if (suite === 'server') fields += `<fieldset class="selection-group"><legend>Workloads</legend><div class="selection-grid">${eventNames.map((event,index) => `<label class="check-line"><input type="checkbox" name="events" value="${index+1}" checked><span>${event}</span></label>`).join('')}</div></fieldset>`;
+  if (suite !== 'islands') fields += `<label class="field">Exact Forma source ${['client','paired'].includes(suite)?'commits':'commit'}<textarea name="refs" rows="2" spellcheck="false" required>${escape(state.config.currentForma.sourceCommit)}</textarea><small>${['client','paired'].includes(suite)?'One to four exact 40-character commits, separated by commas. Published Forma control is included.':'A 40-character source commit. This never replaces the frozen historical control.'}</small></label>`;
+  else fields += '<p class="resource-note">Island recipes use frozen package versions. This workflow has no candidate source override.</p>';
+  if (suite === 'client') fields += '<fieldset class="selection-group"><legend>Additional controlled profiles</legend><label class="check-line"><input type="checkbox" name="profileRows"><span>Include row profiles</span></label><label class="check-line"><input type="checkbox" name="compilerTemplates"><span>Include compiler template profiles</span></label></fieldset>';
+  $('#study-fields').innerHTML = fields; $('#study-dialog').showModal();
+}
+$('#study-form').onsubmit = async event => {
+  event.preventDefault(); const form = new FormData(event.target), suite = form.get('suite'); const input = { suite, diagnostic:form.get('mode') === 'diagnostic', autoImport:form.has('autoImport') };
+  if (['server','islands'].includes(suite)) input.cars = form.getAll('cars');
+  if (suite === 'server') input.events = form.getAll('events').map(Number);
+  if (['server','compression'].includes(suite)) input.formaRef = form.get('refs').trim();
+  if (['client','paired'].includes(suite)) input.formaRefs = form.get('refs').trim();
+  if (suite === 'client') { input.profileRows = form.has('profileRows'); input.compilerTemplates = form.has('compilerTemplates'); }
+  $('#dispatch-button').disabled = true;
+  try { await request('/api/dispatch', input); $('#study-dialog').close(); toast('Study queued for GitHub. Follow its progress in Hosted activity.'); await refresh(); setTimeout(refreshRemote, 3000); }
+  catch(error) { $('#dispatch-error').textContent = error.message; } finally { $('#dispatch-button').disabled = false; }
+};
+for (const button of document.querySelectorAll('.close-dialog')) button.onclick = () => $('#study-dialog').close();
+function renderHistory() {
+  const query = $('#history-search').value.toLowerCase();
+  const rows = state.history.filter(run => [run.id,run.suite,run.status,run.quality,run.originalStatus].join(' ').toLowerCase().includes(query));
+  $('#history-rows').innerHTML = rows.length ? rows.map(run => `<tr><td><strong>${escape(run.suite)} study</strong><small class="mono">${escape(run.id)}</small>${run.source?`<small>Laboratory source ${escape(run.source.slice(0,12))}</small>`:''}</td><td><div class="badge-group">${badge(run.originalStatus || run.status)} ${badge(run.originalQuality || run.quality)}</div>${run.originalStatus?`<small>Imported · remote ${escape(run.remote?.conclusion || 'outcome retained')} · attempt ${escape(run.remote?.attempt || '—')}</small>`:''}</td><td>${date(run.startedAt)}${run.importedAt?`<small>Imported ${date(run.importedAt)}</small>`:''}</td><td><div class="review-actions">${link(run.report,'Report')}<button data-verify="${escape(run.id)}">Verify</button><button data-report="${escape(run.id)}">Refresh</button></div></td></tr>`).join('') : '<tr><td colspan="4" class="empty-small">No studies match this filter.</td></tr>';
+  for (const button of document.querySelectorAll('[data-verify],[data-report]')) button.onclick = () => localAction(button.dataset.verify?'verify':'report', button.dataset.verify || button.dataset.report);
+}
+$('#history-search').oninput = renderHistory;
+function renderRemote() {
+  const data = state.remote, runs = data.runs || [];
+  $('#remote-note').textContent = data.error || (state.account.connected ? `Connected as ${state.account.login}. Hosted progress refreshes automatically. Completed evidence can be imported, including failed runs.` : 'Connect your local GitHub CLI with gh auth login, then refresh. Credentials stay on this computer.');
+  const markup = runs.length ? runs.map(run => `<article class="remote-row"><div class="run-glyph ${run.status==='completed'?'done':'busy'}">⌁</div><div class="run-summary"><h3>${escape(state.workflows[Object.keys(state.workflows).find(key => run.workflow?.endsWith(state.workflows[key].file))]?.title || run.name)}</h3><p>${escape(run.title || run.name)}</p><small>#${run.id} · attempt ${run.attempt} · ${date(run.createdAt)}</small></div><div class="remote-status">${badge(run.status==='completed'?run.conclusion:run.status)}<div class="review-actions">${link(run.url,'GitHub')}<button data-progress="${run.id}">Steps</button>${run.status==='completed'?`<button data-import="${run.id}" data-attempt="${run.attempt}">Import evidence</button>`:''}</div></div><div class="job-detail" id="job-${run.id}" hidden></div></article>`).join('') : '<div class="empty"><span>⌁</span><h3>No hosted studies yet.</h3><p>Choose a suite above to start an explicit measurement.</p></div>';
+  if (markup === remoteMarkup) return; remoteMarkup = markup; $('#remote-runs').innerHTML = markup;
+  for (const button of document.querySelectorAll('[data-import]')) button.onclick = async () => { try { await request('/api/import',{runId:button.dataset.import,attempt:Number(button.dataset.attempt)}); toast('Evidence import queued. Original outcomes and raw files will be retained.'); await refresh(); } catch(error) { toast(error.message); } };
+  for (const button of document.querySelectorAll('[data-progress]')) button.onclick = async () => { const box = $('#job-'+button.dataset.progress); if (!box.hidden) { box.hidden=true; return; } box.hidden=false; box.textContent='Loading workflow steps…'; try { const run=await request('/api/remote/'+button.dataset.progress); box.innerHTML=run.jobs.map(job=>`<strong>${escape(job.name)} ${badge(job.conclusion||job.status)}</strong><ol>${job.steps.map(step=>`<li>${escape(step.name)} ${badge(step.conclusion||step.status)}</li>`).join('')}</ol>`).join(''); } catch(error){box.textContent=error.message;} };
+}
+function renderLedger() {
+  $('#change-count').textContent = String(ledger.changes.length).padStart(2,'0'); $('#ledger-boundary').textContent=ledger.claimBoundary;
+  $('#engineering-cards').innerHTML=ledger.changes.map(change=>`<article class="engineering-card"><div class="card-top"><span class="eyebrow">${escape(change.id)}</span>${badge(change.status)}</div><h3>${escape(change.title)}</h3><p>${escape(change.finding)}</p>${change.measurements?.[0]?`<div class="measurement"><span>${escape(change.measurements[0].metric)}</span><strong>${number(change.measurements[0].baseline?.value)} <i>→</i> ${number(change.measurements[0].candidate?.value)} <small>${escape(change.measurements[0].unit)}</small></strong><small>Historical campaign ${escape(change.measurements[0].campaignId)} · ${escape(change.measurements[0].pairing)}</small></div>`:''}<details><summary>Decision, tradeoffs & evidence</summary><p>${escape(change.change)}</p><h4>Tradeoffs</h4><ul>${(change.tradeoffs||[]).map(text=>`<li>${escape(text)}</li>`).join('')}</ul><h4>Remaining targets</h4><ul>${(change.remainingTargets||[]).map(text=>`<li>${escape(text)}</li>`).join('')}</ul><div class="evidence-links">${(change.evidence||[]).map(e=>link(e.path.startsWith('https:')?e.path:'/'+e.path,e.label)).join('')}</div></details></article>`).join('');
+}
+function renderTasks() {
+  const markup = state.tasks.length ? state.tasks.map(task=>`<details class="task"><summary><span class="task-kind">${escape(task.kind)}</span><span>${escape(task.input?.suite || task.input?.id || task.input?.runId || 'Local control')}</span><span>${badge(task.status)}</span><small>${date(task.createdAt)}</small></summary><div class="task-body">${task.error?`<p class="error-text">${escape(task.error)}</p>`:''}${task.result?.report?link(task.result.report,'Open retained report'):''}${task.result?.output?`<pre>${escape(task.result.output)}</pre>`:''}${(task.messages||[]).map(message=>`<p class="log-line"><time>${date(message.at)}</time>${escape(message.text)}</p>`).join('')}${task.kind==='dispatch'&&task.result?`<p>Request ${escape(task.result.requestId)} · ${task.result.autoImport?'Automatic evidence import enabled':'Manual import selected'}</p>`:''}</div></details>`).join('') : '<p class="empty-small">No operations yet. Start a study, check prerequisites, or inspect retained evidence.</p>';
+  if(markup!==taskMarkup){const opened=[...document.querySelectorAll('.task[open]')].map(el=>el.querySelector('summary').textContent);taskMarkup=markup;$('#task-list').innerHTML=markup;for(const el of document.querySelectorAll('.task'))if(opened.includes(el.querySelector('summary').textContent))el.open=true;}
+}
+async function refresh() {
+  try { const first = !state; state=await request('/api/state'); $('#history-count').textContent=String(state.history.length).padStart(2,'0'); $('#account').textContent=state.account.connected?`● ${state.account.login}`:state.account.loading?'Checking GitHub…':'Connect GitHub'; $('#connection-state').textContent=state.active?`Laboratory active · ${state.active.runId}`:'Connected locally'; if(first)renderSuites();renderHistory();renderRemote();renderTasks(); }
+  catch(error){$('#connection-state').textContent='Connection paused · '+error.message;}
+}
+async function refreshRemote(){try{await request('/api/remote?refresh=1');await refresh();}catch(error){toast(error.message);}}
+$('#refresh-remote').onclick=refreshRemote;$('#account').onclick=()=>state.account.connected?toast(`Signed in as ${state.account.login}. GitHub credentials are used only by the local server.`):toast('Use gh auth login in your terminal, then Refresh GitHub. Credentials stay on this computer.');
+async function localAction(action,id){try{await request('/api/local',{action,...(id?{id}:{}),...(action==='diagnostic'?{confirmDiagnostic:true}:{})});toast(`${action==='diagnostic'?'Local diagnostic':'Evidence operation'} queued. Follow Recent operations for results.`);await refresh();}catch(error){toast(error.message);}}
+$('#doctor').onclick=()=>localAction('doctor');$('#diagnostic').onclick=()=>$('#diagnostic-dialog').showModal();$('#cancel-diagnostic').onclick=()=>$('#diagnostic-dialog').close();$('#confirm-diagnostic').onclick=()=>{$('#diagnostic-dialog').close();void localAction('diagnostic');};
+for(const item of document.querySelectorAll('nav a'))item.onclick=()=>{for(const other of document.querySelectorAll('nav a'))other.classList.toggle('active',other===item);};
+await refresh();try{ledger=await request('/api/ledger');renderLedger();}catch(error){$('#engineering-cards').textContent=error.message;}
+void refreshRemote();setInterval(refresh,3000);

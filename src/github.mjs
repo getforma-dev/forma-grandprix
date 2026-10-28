@@ -14,22 +14,24 @@ export const WORKFLOWS = {
   compression: { file: 'grand-prix-compression.yml', title: 'Compression experiment', description: 'Identity, gzip and Brotli with retained wire and decoded-page evidence.' },
 };
 const numberId = value => { if (!/^[1-9]\d{0,19}$/.test(String(value))) throw Error('A numeric GitHub identity is required'); return String(value); };
-export function runCommand(program, args, { cwd, input, timeout = 60_000, maxBytes = 8 * 1024 ** 2, outputFile, onProgress = () => {} } = {}) {
+export function runCommand(program, args, { cwd, input, timeout = 60_000, maxBytes = 8 * 1024 ** 2, outputFile, onProgress = () => {}, beforeForceKill = () => {} } = {}) {
   return new Promise((resolve, reject) => {
     let stdout = '', stderr = '', bytes = 0, failure, fd;
     try { if (outputFile) fd = fs.openSync(outputFile, 'wx'); } catch (error) { reject(error); return; }
-    const child = spawn(program, args, { cwd, env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat', NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
-    const stop = reason => { failure ??= Error(reason); child.kill('SIGTERM'); setTimeout(() => child.kill('SIGKILL'), 1000).unref(); };
+    const child = spawn(program, args, { cwd, env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat', NO_COLOR: '1' }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const signal = name => { try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, name); else child.kill(name); } catch(error) { if (error.code !== 'ESRCH') failure ??= error; } };
+    let forceTimer;
+    const stop = reason => { if (failure) return; failure = Error(reason); signal('SIGTERM'); forceTimer = setTimeout(() => { try { beforeForceKill(child.pid); } catch {} signal('SIGKILL'); }, 5000); forceTimer.unref(); };
     const timer = setTimeout(() => stop('Operation exceeded its time limit'), timeout); timer.unref();
     child.stdout.on('data', data => {
       bytes += data.length;
       if (bytes > maxBytes) { stop('Operation exceeded its output limit'); return; }
-      if (fd !== undefined) fs.writeSync(fd, data); else stdout += data.toString();
+      try { if (fd !== undefined) fs.writeSync(fd, data); else stdout += data.toString(); } catch (error) { stop(error.message); }
     });
-    child.stderr.on('data', data => { stderr = (stderr + data.toString()).slice(-64 * 1024); onProgress(data.toString().slice(-2000)); });
+    child.stderr.on('data', data => { stderr = (stderr + data.toString()).slice(-64 * 1024); try { onProgress(data.toString().slice(-2000)); } catch (error) { stop(error.message); } });
     child.once('error', error => { failure = error; });
     child.once('close', code => {
-      clearTimeout(timer); if (fd !== undefined) fs.closeSync(fd);
+      clearTimeout(timer); clearTimeout(forceTimer); if (fd !== undefined) fs.closeSync(fd);
       if (failure || code !== 0) reject(failure || Error(stderr.trim() || `${program} exited ${code}`));
       else resolve({ stdout, stderr, bytes });
     });
@@ -61,7 +63,7 @@ export function dispatchPlan(root, input) {
     fields.cars = cars.join(',');
   } else if (input.cars !== undefined || input.events !== undefined) throw Error('This suite uses its complete fixed workload');
   if (suite === 'server') {
-    const events = input.events ?? [1, 5, 6, 7];
+    const events = input.events ?? [1, 2, 3, 4, 5, 6, 7, 8];
     if (!Array.isArray(events) || !events.length || events.some(value => !Number.isInteger(value) || value < 1 || value > 8) || new Set(events).size !== events.length) throw Error('Choose server events 1–8 without duplicates');
     fields.events = [...events].sort().join(',');
   } else if (input.events !== undefined) throw Error('Event selection is supported by the server suite');
@@ -98,9 +100,10 @@ export function createGitHub(root, { command = runCommand } = {}) {
       return { ...plan, dispatchedAt: new Date().toISOString(), message: result.stdout.trim(), runUrl: result.stdout.match(/https:\/\/github\.com\/getforma-dev\/forma-grandprix\/actions\/runs\/\d+/)?.[0] ?? null };
     },
     async artifacts(id) { id = numberId(id); const data = await api(`repos/${REPOSITORY}/actions/runs/${id}/artifacts?per_page=100`); return data.artifacts; },
-    async importRun(id, onProgress = () => {}) {
+    async importRun(id, onProgress = () => {}, expectedAttempt) {
       id = numberId(id); onProgress('Checking completed workflow and artifact ownership.');
       const run = await api(`repos/${REPOSITORY}/actions/runs/${id}`);
+      if (expectedAttempt !== undefined && Number(expectedAttempt) !== run.run_attempt) throw Error('The workflow attempt changed; refresh GitHub and select the current attempt');
       if (run.status !== 'completed') throw Error('Wait until the workflow is completed before importing evidence');
       const suite = Object.entries(WORKFLOWS).find(([, value]) => run.path === '.github/workflows/' + value.file)?.[0];
       if (!suite) throw Error('This is not a registered Grand Prix workflow');
@@ -110,38 +113,44 @@ export function createGitHub(root, { command = runCommand } = {}) {
       const artifact = candidates[0]; numberId(artifact.id);
       if (!Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes <= 0 || artifact.size_in_bytes > 256 * 1024 ** 2) throw Error('Artifact exceeds the 256 MiB download limit');
       if (artifact.workflow_run?.id && String(artifact.workflow_run.id) !== id) throw Error('Artifact belongs to another workflow run');
-      const localId = `github-${id}-${run.run_attempt}-${artifact.id}`, destination = runPath(root, localId);
+      let localId = `github-${id}-${run.run_attempt}-${artifact.id}`, destination = runPath(root, localId);
       if (fs.existsSync(destination)) {
         const integrity = verify(destination); if (!integrity.ok) throw Error('Previously imported evidence changed; inspect its integrity report');
-        return { id: localId, reused: true, remoteRunId: run.id, report: `/runs/${localId}/report.html` };
+        const prior = readJSON(path.join(destination, 'manifest.json'));
+        if (prior.status === 'imported') return { id: localId, reused: true, remoteRunId: run.id, remoteAttempt: run.run_attempt, report: `/runs/${localId}/report.html` };
+        localId += '-retry-' + randomUUID().slice(0, 8); destination = runPath(root, localId);
       }
       const release = acquire(root, localId, { operation: 'import' });
-      const scratch = safePath(root, `.grandprix/downloads/${randomUUID()}`); fs.mkdirSync(scratch, { recursive: true });
+      const scratch = safePath(root, `.grandprix/downloads/${randomUUID()}`);
       let manifest;
       try {
+        fs.mkdirSync(scratch, { recursive: true });
         const archive = path.join(scratch, 'artifact.zip');
         onProgress('Downloading the exact workflow artifact.');
         await call(['api', `repos/${REPOSITORY}/actions/artifacts/${artifact.id}/zip`], { outputFile: archive, maxBytes: 256 * 1024 ** 2, timeout: 180_000, onProgress });
         const digest = hash(fs.readFileSync(archive));
-        if (artifact.digest && artifact.digest !== 'sha256:' + digest) throw Error('Downloaded archive differs from the GitHub artifact digest');
-        fs.mkdirSync(destination); fs.copyFileSync(archive, path.join(destination, 'original.zip'), fs.constants.COPYFILE_EXCL);
+        fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.mkdirSync(destination); fs.copyFileSync(archive, path.join(destination, 'original.zip'), fs.constants.COPYFILE_EXCL);
         manifest = { schemaVersion: 1, id: localId, status: 'importing', mode: 'remote-evidence', quality: 'unverified-import', startedAt: run.created_at,
           importedAt: new Date().toISOString(), remote: { repository: REPOSITORY, runId: run.id, attempt: run.run_attempt, conclusion: run.conclusion, workflow: run.path, headSha: run.head_sha, url: run.html_url, artifactId: artifact.id, artifactName: artifact.name, archiveSha256: digest, advertisedDigest: artifact.digest || null },
           note: 'Imported GitHub evidence. This is not a new local measurement; original campaign and qualification remain in retained records.' };
         writeJSON(path.join(destination, 'manifest.json'), manifest, true);
+        if (artifact.digest && artifact.digest !== 'sha256:' + digest) throw Error('Downloaded archive differs from the GitHub artifact digest');
         const extracted = path.join(destination, 'artifacts', 'remote'); fs.mkdirSync(extracted, { recursive: true });
         onProgress('Checking archive paths, size bounds and the original evidence seal.');
         await command('python3', ['-c', SAFE_EXTRACT, archive, extracted], { cwd: root, timeout: 60_000, maxBytes: 1024 ** 2 });
         const original = readJSON(safePath(extracted, 'manifest.json')), checked = verify(extracted);
         if (!checked.ok) throw Error('Remote evidence integrity failed: ' + checked.problems.slice(0, 5).join('; '));
-        if (original.remote?.runId && String(original.remote.runId) !== id) throw Error('Remote manifest run identity differs');
+        if (original.remote?.repository !== REPOSITORY || String(original.remote?.runId) !== id || String(original.remote?.runAttempt) !== String(run.run_attempt)) throw Error('Remote manifest repository, run or attempt identity differs');
+        if (!/^[a-f0-9]{40}$/.test(run.head_sha) || original.source?.commit !== run.head_sha || original.labSourceCommit !== run.head_sha) throw Error('Remote laboratory source differs from the executed GitHub commit');
         manifest.remote.originalManifest = original; manifest.remote.originalIntegrity = checked;
-        for (const field of ['protocolVersion', 'testHash', 'config', 'environment', 'source', 'plan', 'expected']) if (original[field] !== undefined) manifest[field] = original[field];
+        for (const field of ['protocolVersion', 'testHash', 'config', 'environment', 'source', 'plan', 'labSourceCommit', 'formaSourceCommits']) if (original[field] !== undefined) manifest[field] = original[field];
+        manifest.expected = (original.expected || []).map(item => ({ ...item, ...(item.trial ? { trial: 'artifacts/remote/' + item.trial } : {}) }));
+        manifest.originalStatus = original.status; manifest.originalQuality = original.quality;
         manifest.observedAt = original.startedAt || run.created_at; manifest.finishedAt = original.finishedAt || run.updated_at;
         manifest.status = 'imported'; manifest.quality = 'remote-import';
         writeJSON(path.join(destination, 'manifest.json'), manifest); generateReport(destination); seal(destination);
         onProgress('Evidence retained and readable reports refreshed.');
-        return { id: localId, remoteRunId: run.id, originalStatus: original.status, originalQuality: original.quality, report: `/runs/${localId}/report.html` };
+        return { id: localId, remoteRunId: run.id, remoteAttempt: run.run_attempt, originalStatus: original.status, originalQuality: original.quality, report: `/runs/${localId}/report.html` };
       } catch (error) {
         if (manifest) { manifest.status = 'failed'; manifest.error = error.message; manifest.finishedAt = new Date().toISOString(); writeJSON(path.join(destination, 'manifest.json'), manifest); try { generateReport(destination); seal(destination); } catch {} }
         throw error;
@@ -155,6 +164,7 @@ with zipfile.ZipFile(archive) as z:
  infos=z.infolist();assert len(infos)<=20000 and sum(i.file_size for i in infos)<=512*1024*1024,'archive exceeds extraction limits'
  names=set()
  for i in infos:
+  assert i.orig_filename==i.filename,'unsafe archive name'
   p=pathlib.PurePosixPath(i.filename);name=i.filename.rstrip('/')
   assert name and not p.is_absolute() and '..' not in p.parts and '\\\\' not in name and ':' not in name and '\\x00' not in name,'unsafe archive path'
   assert p.as_posix()==name and name not in names,'duplicate or noncanonical archive member';names.add(name)

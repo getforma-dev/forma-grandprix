@@ -338,6 +338,8 @@ export function collectReport(runDir) {
   if (!measurements.length) warnings.push('No recognized measurements were recorded.');
   if (archives.length) warnings.push(`${archives.length} ZIP archive(s) retained but not expanded. Summaries are not substituted for raw samples; analyze a verified extraction to review its measurements.`);
   if (manifest.status && !['completed', 'complete', 'passed', 'historical', 'imported'].includes(manifest.status)) warnings.push(`Run status is ${manifest.status}; this report may contain partial evidence.`);
+  const original = manifest.remote?.originalManifest;
+  if (original && original.status !== 'completed') warnings.push(`Original hosted attempt: ${original.status || 'unknown'} / ${original.quality || 'unrecorded'}. Importing does not repair its failures or upgrade qualification.`);
   return {
     schemaVersion: 1, title: 'Forma Grand Prix · Engineering evidence', runId: manifest.id ?? manifest.runId ?? path.basename(runDir),
     status: manifest.status ?? 'unknown', manifestAvailable: fs.existsSync(manifestFile), manifest, warnings, measurements, comparisons, sourceComparisons, evidence, archives,
