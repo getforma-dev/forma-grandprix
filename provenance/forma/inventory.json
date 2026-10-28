@@ -1,0 +1,34 @@
+{
+  "sourceRepository": "https://github.com/getforma-dev/forma",
+  "sourceCommit": "29f29daec33a1e9299f462f3c3685979a0720f64",
+  "files": {
+    "provenance/forma/CHANGELOG.md": {
+      "sourcePath": "CHANGELOG.md",
+      "sha256": "6a85f20159a2fbbd6443a48133de2227d9b1e7e65be9a3b6bbf8df270a6a6d45"
+    },
+    "provenance/forma/docs/release/3.1-PERFORMANCE-TRADEOFFS.md": {
+      "sourcePath": "docs/release/3.1-PERFORMANCE-TRADEOFFS.md",
+      "sha256": "7e35e82ec5b0cca121b286ddcb05fd5e4a6d084f69d0bc601437487570508a7b"
+    },
+    "provenance/forma/SECURITY.md": {
+      "sourcePath": "SECURITY.md",
+      "sha256": "4d2f389677a74b388300bf30fecd121dc1503cd94392cb93ea40f449ddba77bc"
+    },
+    "provenance/forma/docs/DEPLOYMENT.md": {
+      "sourcePath": "docs/DEPLOYMENT.md",
+      "sha256": "32f5268d0af14d99fc972b1251873ce799656ba8e6a75153f053d9408319f261"
+    },
+    "provenance/forma/docs/release/FORMA-294-COMPILER-CANDIDATE.md": {
+      "sourcePath": "docs/release/FORMA-294-COMPILER-CANDIDATE.md",
+      "sha256": "37e94e682cd77663ab29455bf76a79de68c32eadbd71f2688efd7eb79aa4a9b4"
+    },
+    "provenance/forma/docs/release/3.2-PUBLICATION.md": {
+      "sourcePath": "docs/release/3.2-PUBLICATION.md",
+      "sha256": "9c3016f263646e32bd177018a88ca01a70c687f4e793999c2c0b86832d52c79f"
+    },
+    "provenance/forma/docs/release/3.2-PERFORMANCE-DECISION.md": {
+      "sourcePath": "docs/release/3.2-PERFORMANCE-DECISION.md",
+      "sha256": "620faba0b8ba6b598789fd2a70a0c90f71cc8845fd3a91ade98e808ae106d606"
+    }
+  }
+}
