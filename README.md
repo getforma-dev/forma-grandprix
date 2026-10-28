@@ -11,9 +11,10 @@ shipped in 3.1 and were inherited by 3.2; earlier timings are not fresh 3.2 resu
 
 ## One entry point
 
-From `benchmarks/grand-prix`, with Node 22+ (the repository uses its `.node-version`):
+From this repository root, with the Node version in `.node-version`:
 
 ```sh
+npm start
 npm run gp -- dashboard
 npm run gp -- changes
 npm run gp -- catalog
@@ -22,7 +23,13 @@ npm run gp -- doctor --suite server
 npm test
 ```
 
-`dashboard` prints the local HTML path. It links engineering history, reports,
+`npm start` serves the live control panel at http://127.0.0.1:4317. It launches
+remote GitHub campaigns, follows their status, and imports results into local history.
+GitHub authentication stays in the local server through your signed-in `gh` CLI.
+The lightweight local tools verify evidence, rebuild reports, and check prerequisites;
+opening the panel never launches a benchmark.
+
+`dashboard` also prints a portable local HTML path. It links engineering history, reports,
 run records, the audit and the original evidence. The control layer uses Node's
 standard library and needs no root dependency installation. Run the tests before
 committing a changed protocol or adapter.
@@ -121,15 +128,18 @@ Round 2 baseline. See [adapter contract](docs/ADAPTERS.md).
 
 | Module | Responsibility |
 | --- | --- |
-| `src/` | Run lifecycle, immutable history, reports, pit cleanup, updates, engineering ledger |
-| `config/` | Protocol identity, entrants/current source, change ledger and update receipts |
+| `src/`, `web/` | Local control server, GitHub integration, run lifecycle, reports, cleanup, updates and ledger |
+| `config/` | Protocol identity, explicit Forma source adapter, entrants, change ledger and update receipts |
 | `harness/` | Proven Linux orchestration, resource/campaign checks, transport and strength budgets |
 | `contestants/`, `client-race/`, `signals-race/`, `island-race/` | Framework-specific adapters and workloads |
 | `tests/` | Lifecycle, cleanup, reporting, provenance and regression refusal controls |
 | `evidence/2026-10-24/` | Frozen Round 2 campaigns, original hashes and reports |
+| `provenance/` | Hashed original Forma documents and verifiable release ancestry |
 | `runs/`, `updates/`, `.grandprix/` | Ignored local state; never source or release artifacts by accident |
 
-This is a modular application inside the canonical `getforma-dev/forma` repository.
+This is the independent `getforma-dev/forma-grandprix` repository. Forma is an
+explicit source adapter, fetched by exact commit; the laboratory has its own
+version, workflows, run history and lifecycle. See [extraction and ownership](docs/REPOSITORY-BOUNDARY.md).
 The October 23 FORMA-254 experiment and the older 2.x showcase are historical
 references, not parallel active implementations. The imported baseline inventory
 is `baseline-source.json`. Original `PROTOCOL.md`, `ROUND-2.md`, evidence, and

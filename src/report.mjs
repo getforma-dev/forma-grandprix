@@ -46,7 +46,8 @@ function loadEvidence(runDir) {
   function visit(dir, depth) {
     if (depth > 12) { errors.push(`${relative(dir)}: discovery depth limit reached.`); return; }
     const entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'));
-    if (path.basename(dir) === 'raw') {
+    const encodingTrial = path.basename(path.dirname(dir)).endsWith('-compression') && ['identity', 'br', 'gzip'].includes(path.basename(dir));
+    if (path.basename(dir) === 'raw' || encodingTrial) {
       const records = {}, sources = {};
       for (const event of entries.filter(entry => entry.isDirectory())) {
         const eventDir = path.join(dir, event.name);
@@ -54,7 +55,7 @@ function loadEvidence(runDir) {
           if (file.isFile() && file.name.endsWith('.json') && !file.name.startsWith('_')) readRecord(path.join(eventDir, file.name), event.name, records, sources);
         }
       }
-      groups.push({ trial: relative(path.dirname(dir)) || '.', records, sources });
+      groups.push({ trial: relative(encodingTrial ? dir : path.dirname(dir)) || '.', records, sources });
       return;
     }
     const islands = {}, islandSources = {};
@@ -292,9 +293,9 @@ export function collectReport(runDir) {
     }
   }
   }
-  for (const { event, car } of expectedEntries(manifest)) {
-    if (!EVENTS[event] || groups.some(group => group.records[event]?.[car])) continue;
-    measurements.push({ trial: 'expected', campaignId: null, event, eventLabel: EVENTS[event][0], car, metric: 'missing', label: EVENTS[event][0], unit: EVENTS[event][1], direction: EVENTS[event][2], primary: true,
+  for (const { event, car, trial } of expectedEntries(manifest)) {
+    if (!EVENTS[event] || groups.some(group => (!trial || group.trial === trial) && group.records[event]?.[car])) continue;
+    measurements.push({ trial: trial || 'expected', campaignId: null, event, eventLabel: EVENTS[event][0], car, metric: 'missing', label: EVENTS[event][0], unit: EVENTS[event][1], direction: EVENTS[event][2], primary: true,
       samples: [], status: 'missing', reasons: ['Selected event/competitor produced no raw record.'], statistics: null, warnings: [], source: null, context: {} });
   }
   const comparisons = [];
@@ -356,10 +357,25 @@ function findingText(comparison) {
   return `${comparison.trial} · ${comparison.event} / ${comparison.label} vs ${comparison.competitor}: ${relation}; Forma ${fmt(comparison.ratio)}× the competitor mean (${fmt(Math.abs(comparison.changePercent))}% ${comparison.changePercent < 0 ? 'lower' : 'higher'}, ${comparison.direction} is preferred).${comparison.warnings.length ? ' Exploratory: ' + comparison.warnings.join(' ') : ''}`;
 }
 
+function identityRows(manifest) {
+  const original = manifest.remote?.originalManifest || manifest;
+  const selected = original.formaSourceCommits || original.plan?.formaRefs || (original.plan?.formaRef ? [original.plan.formaRef] : []);
+  return [
+    ['Measurement status', `${original.status || 'unrecorded'} · ${original.quality || 'qualification unrecorded'}`],
+    ['Suite / resource profile', `${original.config?.suite || 'recorded in raw evidence'} / ${original.config?.profile || 'recorded in raw evidence'}`],
+    ['Laboratory commit', original.labSourceCommit || original.source?.commit || 'unrecorded; inspect original evidence'],
+    ['Forma candidate commits', selected.length ? selected.join(', ') : 'No source override recorded; inspect the frozen package locks'],
+    ['Observed at', original.startedAt || manifest.observedAt || 'unrecorded'],
+    ['GitHub run / attempt', manifest.remote ? `${manifest.remote.runId || 'unrecorded'} / ${manifest.remote.runAttempt || manifest.remote.attempt || 'unrecorded'}` : 'Not a hosted import'],
+    ['Scope', original.config?.suite === 'islands' ? 'Frozen registry adapters; this is not a current Forma source substitution.' : 'Use the exact adapter and dependency identities; selected source does not imply a coordinated full-stack rebuild.'],
+  ];
+}
+
 function toMarkdown(report) {
   const lines = [
     '# Forma Grand Prix · Engineering evidence', '', `Run: **${md(report.runId)}** · Status: **${md(report.status)}**`, '', report.interpretation, '',
     `[Machine-readable report](report.json) · [Measurement table](measurements.csv)${report.manifestAvailable ? ' · [Run manifest](manifest.json)' : ''}`, '',
+    '## Run identity and scope', '', ...identityRows(report.manifest).map(([label, value]) => `- **${md(label)}:** ${md(value)}`), '',
     '## Evidence quality', '', ...(report.warnings.length ? report.warnings.map(w => `- ${md(w)}`) : ['- Run provenance is available. Per-measurement caveats below still apply.']), '',
     'Mean and median summarize recorded samples. SD is sample standard deviation; CV = SD / mean. A single sample has no SD/CV. No outliers are discarded. Counts represent repetitions, not individual requests.', '',
     '## Forma observations', '', ...report.comparisons.map(c => `- ${md(findingText(c))}`), '',
@@ -388,7 +404,7 @@ function toHTML(report) {
     }).join('')}</tbody></table></div></section>`;
   }).join('');
   const observations = [...report.comparisons, ...report.sourceComparisons].length ? [...report.comparisons, ...report.sourceComparisons].map(c => `<li>${html(findingText(c))}</li>`).join('') : '<li>No comparable Forma/competitor pairs are available in this run.</li>';
-  const inventory = `<section><h2>Evidence inventory</h2><details><summary>${report.evidence.length} raw records · ${report.archives.length} unexpanded archives</summary><ul>${report.evidence.map(item => `<li><a href="${html(encodeURI(item.source))}">${html(item.source)}</a>${item.supported ? '' : ' · instrumentation record; no aggregate metric inferred'}</li>`).join('')}${report.archives.map(source => `<li><a href="${html(encodeURI(source))}">${html(source)}</a> · not expanded or remeasured</li>`).join('')}</ul></details></section>`;
+  const inventory = `<section><h2>Run identity and scope</h2><dl>${identityRows(report.manifest).map(([label, value]) => `<dt>${html(label)}</dt><dd>${html(value)}</dd>`).join('')}</dl></section><section><h2>Evidence inventory</h2><details><summary>${report.evidence.length} raw records · ${report.archives.length} unexpanded archives</summary><ul>${report.evidence.map(item => `<li><a href="${html(encodeURI(item.source))}">${html(item.source)}</a>${item.supported ? '' : ' · instrumentation record; no aggregate metric inferred'}</li>`).join('')}${report.archives.map(source => `<li><a href="${html(encodeURI(source))}">${html(source)}</a> · not expanded or remeasured</li>`).join('')}</ul></details></section>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Forma Grand Prix · ${html(report.runId)}</title><link rel="icon" href="data:,"/><style>
   :root{color-scheme:dark;--bg:#0c1322;--panel:#131e31;--ink:#eff5ff;--muted:#bdcce0;--accent:#6de3ce}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,sans-serif}main{max-width:1480px;margin:auto;padding:40px 24px 72px}header{border-top:5px solid var(--accent);padding:25px 0}h1{font-size:clamp(2rem,4vw,3.4rem);letter-spacing:-.04em;margin:.3em 0}h2{font-size:1.5rem}p{max-width:95ch;color:var(--muted);overflow-wrap:anywhere}a{color:var(--accent)}nav{display:flex;gap:16px;flex-wrap:wrap}section{margin-top:30px;padding:24px;background:var(--panel);border-radius:10px}table{width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums;font-size:.88rem}caption{text-align:left;padding:8px 0;color:var(--muted)}th,td{padding:12px 9px;border-bottom:1px solid #31415c;vertical-align:top}thead th{color:var(--accent)}td{white-space:nowrap}td:last-child{white-space:normal;min-width:180px}small{display:block;color:var(--muted)}summary{cursor:pointer}details p{font-size:.85rem;max-width:42ch}li{margin-bottom:12px}.table-scroll{overflow:auto}label{display:block;margin:20px 0}input{display:block;width:min(100%,450px);padding:12px;border:1px solid #6c819e;border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}.eyebrow{font-size:.85rem;font-weight:700;letter-spacing:.12em;color:var(--accent)}:focus-visible{outline:3px solid var(--accent);outline-offset:3px}@media print{:root{color-scheme:light;--bg:white;--panel:white;--ink:black;--muted:#333;--accent:#075b4e}main{padding:0}section{padding:10px 0}input,label{display:none}details{display:block}.table-scroll{overflow:visible}table{font-size:8px}}
   </style></head><body><main><header><div class="eyebrow">FORMA · PERFORMANCE LAB</div><h1>Grand Prix evidence</h1><p>Run <strong>${html(report.runId)}</strong> · ${html(report.status)}</p><p>${html(report.interpretation)}</p><nav aria-label="Report downloads"><a href="report.md">Readable Markdown</a><a href="measurements.csv">Measurements CSV</a><a href="report.json">Report JSON</a>${report.manifestAvailable ? '<a href="manifest.json">Run manifest</a>' : ''}</nav></header><section><h2>Evidence quality</h2><ul>${(report.warnings.length ? report.warnings : ['Run provenance is available. Read the per-measurement caveats before interpreting differences.']).map(w => `<li>${html(w)}</li>`).join('')}</ul><p>SD is sample standard deviation. CV is SD / mean. Single measurements have no SD/CV. Repetitions are the sample unit; individual requests are not independent samples. No outliers are removed and no significance test is claimed.</p></section><section><h2>Forma strengths and investigation opportunities</h2><p>These are descriptive workload observations. They do not establish broad framework superiority.</p><details><summary>Review ${report.comparisons.length + report.sourceComparisons.length} metric comparisons</summary><ul>${observations}</ul></details></section><label for="filter">Filter measurement rows<input id="filter" type="search" placeholder="e.g. forma, create1000, excluded"></label><nav aria-label="Events">${groups.map(event => `<a href="#${event}">${html(event)}</a>`).join('')}</nav>${sections}${inventory}<section><h2>Next investigations</h2><ol>${report.nextSteps.map(step => `<li>${html(step)}</li>`).join('')}</ol></section></main><script>document.getElementById('filter').addEventListener('input',function(){const q=this.value.toLowerCase();document.querySelectorAll('tbody tr').forEach(row=>{row.hidden=!row.textContent.toLowerCase().includes(q)})});</script></body></html>\n`;

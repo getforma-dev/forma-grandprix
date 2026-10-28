@@ -69,8 +69,8 @@ function validPaths(paths) {
   assert(Array.isArray(paths) && paths.length && paths.every(p => typeof p === 'string' && p && !p.startsWith('-') && !isAbsolute(p) && !p.includes(':') && !p.includes('\\') && !p.split('/').includes('..')), 'archive paths must be safe repository-relative paths');
 }
 export function archiveForma(ref, paths, destination, options = {}) {
-  const source = ensureFormaSource(ref, options);
   if (options.tree) validPaths([options.tree]); else validPaths(paths);
+  const source = ensureFormaSource(ref, options);
   const args = options.tree ? ['archive', `${ref}:${options.tree}`] : ['archive', ref, ...paths];
   const bytes = git(source.repository, args, { encoding: undefined, maxBuffer: 128 * 1024 ** 2 });
   mkdirSync(destination); // A fresh destination is mandatory; never merge evidence/work trees.

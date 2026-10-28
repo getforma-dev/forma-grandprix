@@ -42,36 +42,47 @@ candidate from today's VM directly with last week's baseline as a causal speedup
 Rerun the control beside it. Keep different campaigns and resource profiles visible.
 No concurrent builds/installations may overlap timing within the measurement host.
 
-## Pull requests are diagnostic
+## Independent workflows and the control panel
 
-The existing pull-request workflows intentionally force diagnostic mode and run
-correctness/strength checks. A green pull request is not a new qualified performance
-baseline. A qualified campaign requires the explicit hosted inputs above and all
-original source, transport, correctness, browser and CPU-allocation checks.
+All five measurement workflows live in `getforma-dev/forma-grandprix`. They run
+only after an explicit dispatch; ordinary pushes and PRs run the laboratory's unit
+and refusal controls. A green software check is not a measured performance result.
+The measurement defaults are `ubuntu-24.04`, `gha-4-v1`, and `diagnostic=false`.
+A qualified campaign must still pass source, transport, correctness, browser and
+CPU-allocation checks. Missing or incompatible evidence stays unqualified.
 
-The workflow defaults still use `native-8-v1` with diagnostics allowed. Do not
-leave those defaults unchanged and then label the output `gha-4-v1` afterward.
+Run `npm start` locally, then open http://127.0.0.1:4317. Choose the suite and its
+supported test selection, review the exact Forma revision, and launch the remote
+run. GitHub authentication is provided by the local `gh` CLI; credentials never
+enter browser JavaScript. Test execution happens on GitHub. The panel shows remote
+progress and provides artifact synchronization into the local evidence history.
+
+Server tests support entrant and event selection. The client suite retains its
+paired complete grid because filtering it would change that campaign contract.
+Islands use their frozen registry cohort. They currently do not substitute the
+selected Forma source candidate. The panel must display this boundary rather than
+present frozen package observations as current release measurements.
 
 ## Keep readable, durable results
 
-Existing workflows upload raw measurements, driver manifests and ownership/cleanup
-receipts. They do not yet automatically generate the new laboratory dashboard or
-HTML/Markdown/CSV reports. Download the exact artifact ZIP, record its GitHub run,
-attempt and SHA-256, and promote it into the retained `evidence/` collection before
-importing it through the application:
+Each attempted workflow starts an evidence record before dependency installation.
+The runner captures process logs, raw measurements, exact run/attempt and source
+identities, cleanup receipts, and HTML/Markdown/CSV/JSON reports. Finalization and
+artifact upload run on failures too. Failed attempts and unavailable measurements
+remain visible. Workflow completion alone never establishes qualification.
 
-```sh
-npm run gp -- import-evidence evidence/REVIEWED-CAMPAIGN/artifact.zip --id historic-UNIQUE-ID
-npm run gp -- verify historic-UNIQUE-ID
-npm run gp -- dashboard
-```
+Use the control panel to sync completed artifacts and verify the imported run.
+Original archive digests and remote identities stay with the local record. The
+panel's report and evidence links read this retained copy; they do not depend on
+expiring download URLs. Report regeneration is a derived view, not a new campaign.
 
-Replace the example paths/ID with reviewed lowercase identifiers. Importing is
-analysis of the original observations, not a rerun or a qualification upgrade.
-Record accepted changes and costs in `config/change-ledger.json` with exact sources
-and the original evidence link. Never overwrite the prior baseline.
+Artifacts expire after **30 days**. Sync before expiry and back up `runs/`; local
+run history is deliberately ignored by Git. Publish selected reviewed evidence
+explicitly under `evidence/` with original ZIP/digest and source references, or
+retain it in a durable archive. Keep the before/after rationale and accepted costs
+in `config/change-ledger.json`. Do not overwrite historical controls.
 
-Artifacts currently expire after **30 days**. Workflow logs and temporary artifact
-URLs are not a permanent scientific archive. Meaningful results need their original
-ZIP and digest retained in version control. Cleanup remains run-owned: no global
-Docker pruning or deletion of other jobs' resources.
+Cleanup remains run-owned. Disposable dependency/build output is removed before
+publication; original observations, source and lock identities, logs, readable
+reports and integrity receipts remain. Never globally prune Docker or delete
+another job's resources.

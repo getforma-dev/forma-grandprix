@@ -6,8 +6,29 @@ import { pathToFileURL } from 'node:url';
 import { ROOT, acquire, config, environment, readJSON, runPath, seal, sourceIdentity, writeJSON } from './session.mjs';
 import { generateReport } from './report.mjs';
 import { planCleanup, applyCleanup } from './cleanup.mjs';
+import { planRecovery, applyRecovery } from './recovery.mjs';
+import { ensureFormaSource } from '../harness/forma-source.mjs';
 
 export const SUITES = ['server', 'client', 'islands', 'paired', 'compression'];
+const serverEvents = ['sprint', 'endurance', 'multicore', 'reaction', 'fuel', 'grid', 'weight', 'pitstop'];
+export function eventSelection(text = '1-8') {
+  const selected = new Set();
+  for (const item of text.split(',')) {
+    if (!/^[1-8](?:-[1-8])?$/.test(item)) throw Error('Server events must be numbers or ranges within 1–8');
+    const [first, last = first] = item.split('-').map(Number);
+    if (first > last) throw Error('Server event ranges must ascend');
+    for (let event = first; event <= last; event++) selected.add(serverEvents[event - 1]);
+  }
+  return [...selected];
+}
+function selectedRefs(suite, env) {
+  if (suite === 'islands' && [env.GP_FORMA_REFS, env.GP_CLIENT_REFS, env.GP_FORMA_REF].some(Boolean)) throw Error('Islands measures locked registry adapters; exact Forma source candidates are unsupported in this lane');
+  const refs = (['paired', 'client'].includes(suite) ? env.GP_FORMA_REFS || env.GP_CLIENT_REFS || '' : env.GP_FORMA_REF || '').split(',').filter(Boolean);
+  if (refs.some(ref => !exact(ref)) || new Set(refs).size !== refs.length || refs.length > 4) throw Error('Forma selections must be one to four unique exact commits');
+  if (['paired', 'compression'].includes(suite) && !refs.length) throw Error('This comparison requires an exact Forma source commit');
+  if (['server', 'compression'].includes(suite) && refs.length > 1) throw Error('Server input takes one exact Forma source commit');
+  return refs;
+}
 const exact = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 export function driverPlan(root, suite, env = process.env) {
   if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
@@ -15,16 +36,20 @@ export function driverPlan(root, suite, env = process.env) {
   if (!['gha-4-v1', 'native-8-v1'].includes(profile)) throw Error('Unknown resource profile');
   if (!['true', 'false'].includes(env.GP_DIAGNOSTIC ?? 'false')) throw Error('GP_DIAGNOSTIC must be true or false');
   const diagnostic = env.GP_DIAGNOSTIC === 'true';
-  const refs = (['paired', 'client'].includes(suite) ? env.GP_FORMA_REFS || env.GP_CLIENT_REFS || '' : env.GP_FORMA_REF || '').split(',').filter(Boolean);
-  if (refs.some(ref => !exact(ref)) || new Set(refs).size !== refs.length || refs.length > 4) throw Error('Forma selections must be one to four unique exact commits');
-  if (['paired', 'compression'].includes(suite) && !refs.length) throw Error('This comparison requires an exact Forma source commit');
-  if (['server', 'compression'].includes(suite) && refs.length > 1) throw Error('Server input takes one exact Forma source commit');
+  const refs = selectedRefs(suite, env);
   const runtimeEnv = { GP_PROFILE: profile, GP_DIAGNOSTIC: String(diagnostic) };
   const args = [];
+  let budgetCheck = { applicable: false, reason: 'This suite does not use server strength budgets.' };
+  const allowedCars = config(root).suites[suite]?.cars;
+  if (allowedCars && env.GP_CARS && env.GP_CARS !== 'all' && env.GP_CARS.split(',').some(car => !allowedCars.includes(car))) throw Error('Unknown selected competitor');
   if (['server', 'compression'].includes(suite)) {
     args.push('harness/ci-run.mjs');
-    Object.assign(runtimeEnv, { GP_CARS: suite === 'compression' ? 'forma' : env.GP_CARS || 'forma', GP_EVENTS: suite === 'compression' ? '1,3,4,5,7' : env.GP_EVENTS || '1,5-7',
-      GP_FORMA_REF: refs[0] || '', GP_BASELINE: 'true', GP_COMPRESSION: String(suite === 'compression'), GP_CHECK_BUDGETS: String(suite !== 'compression') });
+    const events = eventSelection(suite === 'compression' ? '1,3,4,5,7' : env.GP_EVENTS || '1-8');
+    const cars = env.GP_CARS || 'all';
+    const applicable = suite === 'server' && (cars === 'all' || cars.split(',').includes('forma')) && ['sprint', 'fuel', 'grid', 'weight'].every(event => events.includes(event));
+    budgetCheck = { applicable, reason: applicable ? 'All required Forma strength measurements were selected.' : 'Not applicable: requires Forma and server events 1,5,6,7.' };
+    Object.assign(runtimeEnv, { GP_CARS: suite === 'compression' ? 'forma' : env.GP_CARS || 'all', GP_EVENTS: suite === 'compression' ? '1,3,4,5,7' : env.GP_EVENTS || '1-8',
+      GP_FORMA_REF: refs[0] || '', GP_BASELINE: 'true', GP_COMPRESSION: String(suite === 'compression'), GP_CHECK_BUDGETS: String(budgetCheck.applicable) });
   } else if (suite === 'paired') {
     args.push('harness/paired-server.mjs'); runtimeEnv.GP_FORMA_REFS = refs.join(',');
   } else {
@@ -35,10 +60,10 @@ export function driverPlan(root, suite, env = process.env) {
       args.push('harness/client-linux.mjs', '--chrome', chrome, '--chrome-sha256', browser.executableSha256, '--forma-refs', refs.join(','));
       if (env.GP_PROFILE_ROWS === 'true') args.push('--profile-rows');
       if (env.GP_COMPILER_TEMPLATES === 'true') args.push('--compiler-templates');
-    } else args.push('harness/islands-linux.mjs', '--chrome', chrome, '--cars', env.GP_CARS || config(root).suites.islands.cars.join(','));
+    } else args.push('harness/islands-linux.mjs', '--chrome', chrome, '--cars', env.GP_CARS && env.GP_CARS !== 'all' ? env.GP_CARS : config(root).suites.islands.cars.join(','));
     if (diagnostic) args.push('--diagnostic');
   }
-  return { suite, profile, diagnostic, formaRefs: refs, args, env: runtimeEnv };
+  return { suite, profile, diagnostic, formaRefs: refs, budgetCheck, args, env: runtimeEnv };
 }
 export function beginAttempt(root, suite, env = process.env) {
   if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
@@ -55,6 +80,24 @@ export function beginAttempt(root, suite, env = process.env) {
       runAttempt: env.GITHUB_RUN_ATTEMPT || null, job: env.GITHUB_JOB || null, requestId: env.GP_REQUEST_ID || null,
       url: env.GITHUB_REPOSITORY && env.GITHUB_RUN_ID ? `https://github.com/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : null },
     note: 'Hosted attempt. Qualification is derived from original driver evidence, not job success alone.' };
+  if (['server', 'islands'].includes(suite)) {
+    try {
+      const cars = !env.GP_CARS || env.GP_CARS === 'all' ? config(root).suites[suite].cars : env.GP_CARS.split(',');
+      const events = suite === 'server' ? eventSelection(env.GP_EVENTS || '1-8') : ['islands'];
+      manifest.expected = events.flatMap(event => cars.map(car => ({ event, car })));
+    } catch (error) { manifest.selectionError = error.message; }
+  }
+  if (suite === 'client') {
+    manifest.expected = ['published', ...refs].flatMap(ref => {
+      const trial = `artifacts/${id}-client/${ref}`;
+      const cars = ref === 'published' ? ['forma', 'vanilla', 'react', 'preact', 'solid', 'svelte', 'vue'] : ['forma', 'vanilla'];
+      return [...['dom', 'bundle'].flatMap(event => cars.map(car => ({ event, car, trial }))),
+        ...['forma', 'alien-signals', 'solid', 'preact-signals', 'vue-reactivity'].map(car => ({ event: 'signals', car, trial })),
+        { event: 'signals-version-check', car: 'alien-signals-3.1.2', trial }];
+    });
+  }
+  if (suite === 'paired') manifest.expected = ['published', ...refs].flatMap(ref => serverEvents.slice(0, 7).map(event => ({ event, car: 'forma', trial: `artifacts/${id}-paired/${ref}` })));
+  if (suite === 'compression') manifest.expected = ['identity', 'br', 'gzip'].flatMap(encoding => eventSelection('1,3,4,5,7').map(event => ({ event, car: 'forma', trial: `artifacts/${id}-compression/${encoding}` })));
   writeJSON(path.join(dir, 'manifest.json'), manifest, true);
   return manifest;
 }
@@ -77,7 +120,8 @@ export async function captureAttempt(root, suite, env = process.env) {
       const signal = name => { manifest.interrupted = true; try { if (process.platform !== 'win32') process.kill(-child.pid, name); else child.kill(name); } catch (error) { if (error.code !== 'ESRCH') throw error; } };
       const stop = () => signal('SIGTERM'), interrupt = () => signal('SIGINT');
       process.once('SIGTERM', stop); process.once('SIGINT', interrupt);
-      const clear = () => { process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', interrupt); release.update({ phase: 'finishing' }); };
+      let cleared = false;
+      const clear = () => { if (cleared) return; cleared = true; process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', interrupt); release.update({ phase: 'finishing' }); };
       for (const [pipe, output] of [[child.stdout, process.stdout], [child.stderr, process.stderr]]) pipe.on('data', data => { fs.writeSync(fd, data); output.write(data); });
       child.once('error', error => { clear(); reject(error); });
       child.once('close', status => { clear(); resolve(status ?? 1); });
@@ -95,6 +139,14 @@ export async function finishAttempt(root, suite, env = process.env) {
   if (!fs.existsSync(file)) manifest = beginAttempt(root, suite, env);
   else manifest = readJSON(file);
   if (manifest.config.suite !== suite) throw Error('Finalization suite differs');
+  if (fs.existsSync(path.join(dir, 'integrity.json'))) throw Error('A sealed attempt cannot be finalized again');
+  if (fs.existsSync(path.join(root, '.grandprix/active.json'))) {
+    try {
+      const recovery = planRecovery(root, { runId: manifest.id });
+      if (recovery.blocked.length) throw Error(recovery.blocked.join(' '));
+      applyRecovery(root, recovery); manifest = readJSON(file);
+    } catch (error) { manifest.recoveryError = error.message; manifest.status = 'failed'; }
+  }
   if (['preparing', 'running'].includes(manifest.status)) { manifest.status = 'failed'; manifest.error = 'Preparation or execution did not complete; inspect the linked Actions job logs.'; }
   if (['failure', 'cancelled'].includes(env.GP_WORKFLOW_STATUS) && manifest.status === 'completed') {
     manifest.status = 'failed'; manifest.error = 'A setup, benchmark or cleanup job step failed; retain measurements for diagnosis only.';
@@ -123,9 +175,14 @@ export async function finishAttempt(root, suite, env = process.env) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
     const [operation, suite] = process.argv.slice(2);
-    if (operation === 'begin') console.log(JSON.stringify(beginAttempt(ROOT, suite)));
+    if (operation === 'begin') { const result = beginAttempt(ROOT, suite); console.log(`Retaining ${result.id}: laboratory ${result.labSourceCommit}; Forma ${result.formaSourceCommits.join(',') || 'published baseline'}`); }
+    else if (operation === 'prepare') {
+      if (!SUITES.includes(suite)) throw Error('Unknown CI suite');
+      const refs = selectedRefs(suite, process.env);
+      for (const ref of new Set(suite === 'islands' ? [] : [config(ROOT).baseline.sourceCommit, ...refs])) { ensureFormaSource(ref); console.log('Prepared exact Forma source ' + ref); }
+    }
     else if (operation === 'run') process.exitCode = await captureAttempt(ROOT, suite);
     else if (operation === 'finish') console.log(JSON.stringify(await finishAttempt(ROOT, suite)));
-    else throw Error('Usage: node src/ci-capture.mjs begin|run|finish server|client|islands|paired|compression');
+    else throw Error('Usage: node src/ci-capture.mjs begin|prepare|run|finish server|client|islands|paired|compression');
   } catch (error) { console.error('Grand Prix CI: ' + error.message); process.exitCode = 1; }
 }

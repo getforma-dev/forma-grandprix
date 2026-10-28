@@ -1,57 +1,66 @@
-name: Grand Prix budgets
+name: Grand Prix server
+run-name: Grand Prix server · ${{ inputs.request_id || github.run_id }}
 
+# Timed campaigns are deliberately manual; pull requests run the independent unit CI.
 on:
-  pull_request:
-    paths:
-      - 'benchmarks/grand-prix/**'
-      - '.github/workflows/grand-prix.yml'
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
   workflow_dispatch:
     inputs:
-      cars:
-        description: 'Comma-separated cars, or all'
-        default: 'forma'
-        type: string
-      events:
-        description: 'Server events, 1-8 for the whole server grid'
-        default: '1,5-7'
-        type: string
       runner:
-        description: 'Runner label; must satisfy the selected resource protocol'
-        default: 'ubuntu-latest'
+        description: 'Linux x64 runner label; runtime checks require the selected CPU profile'
+        default: ubuntu-24.04
         type: string
       profile:
-        description: 'Resource protocol; four-CPU GHA results are separate from the native eight-CPU baseline'
-        default: 'native-8-v1'
+        description: 'Frozen allocation; hosted four-CPU results form a separate comparison cohort'
+        default: gha-4-v1
         type: choice
         options:
-          - native-8-v1
           - gha-4-v1
+          - native-8-v1
       diagnostic:
-        description: 'Allow a smaller VM for correctness and strength budgets only'
-        default: true
-        type: boolean
-      forma_ref:
-        description: 'Optional exact 40-character source commit for the Forma crates'
-        default: ''
-        type: string
-      compression:
-        description: 'Explicit opt-in compression experiment; requires a Forma source commit and runs identity/br/gzip separately'
+        description: 'Opt into diagnostic evidence; never reported as qualified measurements'
         default: false
         type: boolean
+      request_id:
+        description: 'Optional local control-room request identifier'
+        default: ''
+        type: string
+      cars:
+        description: 'Comma-separated server competitors, or all'
+        default: all
+        type: string
+      events:
+        description: 'Events 1-8 by default; choose a subset such as 1,5-7 when needed'
+        default: '1-8'
+        type: string
+      forma_ref:
+        description: 'Exact Forma source commit; empty explicitly uses published 3.0.0 control'
+        default: 'fc76ea8531f0e3a85d0224087384e41f52040e3c'
+        type: string
 
 concurrency:
-  group: grand-prix-${{ github.ref }}
-  cancel-in-progress: true
+  group: grand-prix-server-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  GP_RUN_ID: server-${{ github.run_id }}-${{ github.run_attempt }}
+  GP_RESULTS_DIR: ${{ github.workspace }}/runs/server-${{ github.run_id }}-${{ github.run_attempt }}/artifacts
+  GP_REQUEST_ID: ${{ inputs.request_id }}
+  GP_PROFILE: ${{ inputs.profile }}
+  GP_DIAGNOSTIC: ${{ inputs.diagnostic && 'true' || 'false' }}
+  GP_CARS: ${{ inputs.cars }}
+  GP_EVENTS: ${{ inputs.events }}
+  GP_FORMA_REF: ${{ inputs.forma_ref }}
 
 jobs:
-  budgets:
-    permissions:
-      contents: read
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+  campaign:
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,37 +70,30 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Qualify budget refusals
-        run: npm test --prefix benchmarks/grand-prix
-      - name: Run isolated Forma strength check or requested server grid
-        working-directory: benchmarks/grand-prix
-        env:
-          GP_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
-          GP_CARS: ${{ inputs.cars || 'forma' }}
-          GP_EVENTS: ${{ inputs.events || '1,5-7' }}
-          GP_PROFILE: ${{ inputs.profile || 'native-8-v1' }}
-          GP_DIAGNOSTIC: ${{ github.event_name == 'pull_request' && 'true' || inputs.diagnostic && 'true' || 'false' }}
-          GP_FORMA_REF: ${{ github.event_name == 'pull_request' && github.sha || inputs.forma_ref }}
-          GP_BASELINE: 'true'
-          GP_COMPRESSION: ${{ inputs.compression && 'true' || 'false' }}
-          GP_CHECK_BUDGETS: 'true'
-        run: node harness/ci-run.mjs
-      - name: Remove only this run's remaining Docker resources
+      - name: Open retained attempt before preparation
+        run: node src/ci-capture.mjs begin server
+      - name: Verify correctness and refusal controls
+        run: npm test 2>&1 | tee -a "runs/$GP_RUN_ID/setup.log"
+      - name: Prepare exact framework sources separately from laboratory source
+        run: node src/ci-capture.mjs prepare server 2>&1 | tee -a "runs/$GP_RUN_ID/setup.log"
+      - name: Run requested measurements sequentially
+        run: node src/ci-capture.mjs run server
+      - name: Remove only this attempt's Docker resources
         if: always()
-        working-directory: benchmarks/grand-prix
+        run: node harness/cleanup.mjs 2>&1 | tee -a "runs/$GP_RUN_ID/cleanup.log"
+      - name: Compact generated outputs and seal human and machine reports
+        if: always()
         env:
-          GP_RUN_ID: ci-${{ github.run_id }}-${{ github.run_attempt }}
-        run: node harness/cleanup.mjs
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          GP_WORKFLOW_STATUS: ${{ job.status }}
+        run: |
+          node src/ci-capture.mjs finish server
+          cat "runs/$GP_RUN_ID/report.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain every attempt including failed measurements
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: grand-prix-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            benchmarks/grand-prix/results/*.json
-            benchmarks/grand-prix/results/*.lock
-            benchmarks/grand-prix/results/raw/
-            benchmarks/grand-prix/results/*-runtime/
-            benchmarks/grand-prix/results/*-compression/
-            benchmarks/grand-prix/results/*-render-counts/
+          name: grand-prix-server-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runs/${{ env.GP_RUN_ID }}/
           if-no-files-found: error
           retention-days: 30
+          include-hidden-files: true

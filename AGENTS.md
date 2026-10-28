@@ -1,6 +1,6 @@
 # Working on Forma Grand Prix
 
-This is the maintained benchmark application inside the Forma repository. Start
+This is the independent getforma-dev/forma-grandprix laboratory. Start
 with `README.md`, `config/change-ledger.json` and `docs/PERFORMANCE-HISTORY.md`.
 Check the relevant record's `repeatOnlyIf`, rejected designs, accepted tradeoffs
 and remaining targets before proposing the same optimization again.
@@ -29,3 +29,10 @@ and remaining targets before proposing the same optimization again.
 - Every adopted performance change needs a ledger entry: finding, implementation,
   source/release, comparable before/after evidence, costs, remaining targets and
   future regression checks. Rejected/inconclusive experiments also need a record.
+
+- Forma source belongs to its separate repository. Use the explicit source adapter
+  and exact commits; never assume this repository contains framework packages.
+- Full measured campaigns run in this repository’s GitHub Actions. The loopback
+  control panel is a launcher and evidence desk, not a background load generator.
+- Keep remote run ID, attempt, workflow/laboratory SHA, selected Forma source,
+  original archive digest and qualification together when importing evidence.

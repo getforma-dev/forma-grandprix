@@ -1,4 +1,5 @@
 import { readCampaign } from '../harness/campaign.mjs';
+import { islandSourceIdentity } from '../harness/island-source.mjs';
 // One production car per invocation; the portable driver owns its container.
 import puppeteer from 'puppeteer-core';
 import { createHash } from 'node:crypto';
@@ -46,7 +47,7 @@ const sums=summary(rows(100));
 const expectedSummary=[String(sums.count),String(sums.open),money(sums.total),money(sums.average)];
 const output=path.resolve(args.out);
 await mkdir(path.dirname(output),{recursive:true});
-const result={protocol:'forma-264-island-v1',car:args.car,url:sourceUrl,sourceCommit:args.commit??null,qualifiedProfile:!diagnostic,resourceProfile,campaign,processAffinity,container,runs,warmups,
+const result={protocol:'forma-264-island-v1',car:args.car,url:sourceUrl,...islandSourceIdentity(args.commit, {diagnostic}),qualifiedProfile:!diagnostic,resourceProfile,campaign,processAffinity,container,runs,warmups,
   measuredAt:new Date().toISOString(),machine:{platform:os.platform(),arch:os.arch(),cpu:os.cpus()[0]?.model,cpus:os.cpus().length,loadBefore:os.loadavg(),node:process.version},
   browser:{executable:args.chrome,sha256:chromeSha256},samples:[],warmupSamples:[],verified:false};
 const persist=()=>writeFile(output,JSON.stringify(result,null,2)+'\n');

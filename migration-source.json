@@ -583,5 +583,14 @@
     "src/cleanup.mjs": "68df9f5bc9a54950c5119bfd5fd419473e5dd14f556eaddf50bec33ed67e5e01",
     "src/session.mjs": "e06a9ee7b0b2fdc2b8e039d1370a944aee9de3f555ec533ef65bd55241bfee3e",
     "src/cli.mjs": "0d208ab0e67d2d855e0c143946d406220cd204fec2fc878591652e78a27827f2"
+  },
+  "rootSourcePaths": {
+    "LICENSE": "LICENSE",
+    ".node-version": ".node-version",
+    ".github/workflows/grand-prix-paired.yml": ".github/workflows/grand-prix-paired.yml",
+    ".github/workflows/grand-prix-client.yml": ".github/workflows/grand-prix-client.yml",
+    ".github/workflows/grand-prix.yml": ".github/workflows/grand-prix.yml",
+    ".github/workflows/grand-prix-islands.yml": ".github/workflows/grand-prix-islands.yml",
+    ".github/workflows/grand-prix-compression.yml": ".github/workflows/grand-prix-compression.yml"
   }
 }

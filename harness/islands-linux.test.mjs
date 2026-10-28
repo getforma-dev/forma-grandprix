@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { archiveContestants, CARS, inspectedIslandUrl } from './islands-linux.mjs';
 import { profileConfiguration } from './resource-profile.mjs';
+import { sourceFixture } from './source-fixtures.mjs';
+import { islandSourceIdentity } from './island-source.mjs';
 
 const expected = { runId: 'island-control', imageId: 'sha256:' + 'a'.repeat(64) };
 function container() {
@@ -43,14 +45,23 @@ test('the GHA4 URL also requires the actual declared server affinity', () => {
   assert.throws(() => inspectedIslandUrl(c, { ...expected, resourceProfile }));
 });
 
-test('a committed subtree archive contains every contestant even when the driver lives below the repository root', () => {
+test('the standalone laboratory archive contains every committed contestant without Forma history', t => {
+  const fixture = sourceFixture(t);
   const work = mkdtempSync(join(os.tmpdir(), 'forma-264-island-archive-'));
   try {
-    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const commit = fixture.labCommit;
     const contexts = join(work, 'contexts');
-    archiveContestants(contexts, commit);
+    archiveContestants(contexts, commit, { root: fixture.laboratory });
     for (const car of CARS) assert(existsSync(join(contexts, car, 'Dockerfile')), `${car} missing from archive`);
     assert(existsSync(join(contexts, 'forma', 'Cargo.lock')));
     assert(existsSync(join(contexts, 'next', 'package-lock.json')));
   } finally { rmSync(work, { recursive: true, force: true }); }
+});
+
+test('island adapter identity never rebrands a lab commit as a framework candidate', () => {
+  const sha = 'a'.repeat(40), identity = islandSourceIdentity(sha);
+  assert.equal(identity.labSourceCommit, sha); assert.equal(identity.sourceCommitKind, 'laboratory');
+  assert.equal(identity.formaSourceCommit, null); assert.equal(identity.formaSourceKind, 'locked-registry');
+  assert.throws(() => islandSourceIdentity()); assert.throws(() => islandSourceIdentity('main', { diagnostic: true }));
+  assert.equal(islandSourceIdentity(undefined, { diagnostic: true }).labSourceCommit, null);
 });

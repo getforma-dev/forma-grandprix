@@ -1,4 +1,5 @@
 import { createCampaign } from './campaign.mjs';
+import { islandSourceIdentity } from './island-source.mjs';
 import { archiveLabContestants, sourceConfiguration } from './forma-source.mjs';
 import { entrantsFor } from './registry.mjs';
 // Sequential native Linux island qualification. Every Docker resource is run-owned.
@@ -86,7 +87,7 @@ export async function main(argv = process.argv.slice(2)) {
   const engine = JSON.parse(docker('info', '--format', '{{json .}}'));
   validateEngineProfile(resourceProfile, engine);
   const report = { schema: 1, protocol: 'forma-264-island-v1', id, campaign, diagnostic, qualifiedProfile: !diagnostic,
-    sourceCommit, sourceCommitKind: 'laboratory', labSourceCommit: sourceCommit, formaSourceCommit: null, formaSourceKind: 'locked-registry', formaRepositoryUrl: sourceConfiguration(root).repositoryUrl, cars, resourceProfile, browser: lock, engine: { version: engine.ServerVersion, os: engine.OperatingSystem,
+    ...islandSourceIdentity(sourceCommit, { diagnostic }), formaRepositoryUrl: sourceConfiguration(root).repositoryUrl, cars, resourceProfile, browser: lock, engine: { version: engine.ServerVersion, os: engine.OperatingSystem,
       kernel: engine.KernelVersion, cpus: engine.NCPU, memoryBytes: engine.MemTotal },
     before: machine(), steps: [], failures: [], passed: false };
   const save = () => writeFileSync(join(output, 'run.json'), JSON.stringify(report, null, 2) + '\n');
@@ -120,7 +121,7 @@ export async function main(argv = process.argv.slice(2)) {
     docker('network', 'create', '--label', 'grandprix=forma-264', '--label', label, network);
     for (const car of cars) {
       assert(!stopping, 'run interrupted'); checkDisk();
-      const image = `gp264/${id}/${car}`, step = { car, sourceCommit, sourceCommitKind: 'laboratory', labSourceCommit: sourceCommit, formaSourceCommit: null, formaSourceKind: 'locked-registry', locks: treeLocks(join(contexts, car)), passed: false };
+      const image = `gp264/${id}/${car}`, step = { car, ...islandSourceIdentity(sourceCommit, { diagnostic }), locks: treeLocks(join(contexts, car)), passed: false };
       report.steps.push(step); save();
       let containerId;
       try {
@@ -155,7 +156,8 @@ export async function main(argv = process.argv.slice(2)) {
         assert.equal(measured.verified, true); assert.equal(measured.qualifiedProfile, !diagnostic);
         assert.deepEqual(measured.resourceProfile, resourceProfile);
         assert.deepEqual(measured.campaign, campaign);
-        assert.equal(measured.sourceCommit, sourceCommit); assert.equal(measured.browser.sha256, lock.executableSha256);
+        assert.equal(measured.sourceCommit, sourceCommit); assert.equal(measured.labSourceCommit, sourceCommit);
+        assert.equal(measured.sourceCommitKind, 'laboratory'); assert.equal(measured.formaSourceCommit, null); assert.equal(measured.formaSourceKind, 'locked-registry'); assert.equal(measured.browser.sha256, lock.executableSha256);
         step.passed = true;
       } catch (error) { step.error = String(error); console.error(step.error); report.failures.push({ car, error: step.error }); }
       finally {

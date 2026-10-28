@@ -1,42 +1,57 @@
-name: Grand Prix before and after
+name: Grand Prix paired
+run-name: Grand Prix paired · ${{ inputs.request_id || github.run_id }}
 
+# Timed campaigns are deliberately manual; pull requests run the independent unit CI.
 on:
-  pull_request:
-    paths:
-      - 'benchmarks/grand-prix/harness/paired-server*'
-      - '.github/workflows/grand-prix-paired.yml'
   workflow_dispatch:
     inputs:
-      forma_refs:
-        description: 'One to four exact candidate commits; published baseline always runs first'
-        required: true
-        type: string
       runner:
-        description: 'Linux runner label; must satisfy the selected resource protocol'
-        default: 'ubuntu-latest'
+        description: 'Linux x64 runner label; runtime checks require the selected CPU profile'
+        default: ubuntu-24.04
         type: string
       profile:
-        description: 'Resource protocol; four-CPU GHA results are separate from the native eight-CPU baseline'
-        default: 'native-8-v1'
+        description: 'Frozen allocation; hosted four-CPU results form a separate comparison cohort'
+        default: gha-4-v1
         type: choice
         options:
-          - native-8-v1
           - gha-4-v1
+          - native-8-v1
       diagnostic:
-        description: 'Allow a smaller VM; results remain diagnostic'
-        default: true
+        description: 'Opt into diagnostic evidence; never reported as qualified measurements'
+        default: false
         type: boolean
+      request_id:
+        description: 'Optional local control-room request identifier'
+        default: ''
+        type: string
+      forma_refs:
+        description: 'One to four exact Forma source commits; published control always runs on the same VM'
+        default: 'fc76ea8531f0e3a85d0224087384e41f52040e3c'
+        required: true
+        type: string
 
 concurrency:
   group: grand-prix-paired-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
+env:
+  GP_RUN_ID: paired-${{ github.run_id }}-${{ github.run_attempt }}
+  GP_RESULTS_DIR: ${{ github.workspace }}/runs/paired-${{ github.run_id }}-${{ github.run_attempt }}/artifacts
+  GP_REQUEST_ID: ${{ inputs.request_id }}
+  GP_PROFILE: ${{ inputs.profile }}
+  GP_DIAGNOSTIC: ${{ inputs.diagnostic && 'true' || 'false' }}
+  GP_FORMA_REFS: ${{ inputs.forma_refs }}
+
 jobs:
-  comparison:
-    permissions:
-      contents: read
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+  campaign:
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,33 +61,30 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Check candidate and ownership restrictions
-        run: node --test benchmarks/grand-prix/harness/candidate-lock.test.mjs benchmarks/grand-prix/harness/prepare-car.test.mjs benchmarks/grand-prix/harness/transport.test.mjs benchmarks/grand-prix/harness/paired-server.test.mjs benchmarks/grand-prix/harness/resource-profile.test.mjs benchmarks/grand-prix/harness/campaign.test.mjs
-      - name: Run the baseline then each candidate sequentially
-        if: github.event_name == 'workflow_dispatch'
-        working-directory: benchmarks/grand-prix
+      - name: Open retained attempt before preparation
+        run: node src/ci-capture.mjs begin paired
+      - name: Verify correctness and refusal controls
+        run: npm test 2>&1 | tee -a "runs/$GP_RUN_ID/setup.log"
+      - name: Prepare exact framework sources separately from laboratory source
+        run: node src/ci-capture.mjs prepare paired 2>&1 | tee -a "runs/$GP_RUN_ID/setup.log"
+      - name: Run requested measurements sequentially
+        run: node src/ci-capture.mjs run paired
+      - name: Remove only this attempt's Docker resources
+        if: always()
+        run: node harness/paired-server.mjs --cleanup 2>&1 | tee -a "runs/$GP_RUN_ID/cleanup.log"
+      - name: Compact generated outputs and seal human and machine reports
+        if: always()
         env:
-          GP_RUN_ID: paired-${{ github.run_id }}-${{ github.run_attempt }}
-          GP_FORMA_REFS: ${{ inputs.forma_refs }}
-          GP_PROFILE: ${{ inputs.profile || 'native-8-v1' }}
-          GP_DIAGNOSTIC: ${{ inputs.diagnostic && 'true' || 'false' }}
-        run: node harness/paired-server.mjs
-      - name: Remove only this comparison's remaining Docker resources
-        if: always() && github.event_name == 'workflow_dispatch'
-        working-directory: benchmarks/grand-prix
-        env:
-          GP_RUN_ID: paired-${{ github.run_id }}-${{ github.run_attempt }}
-        run: node harness/paired-server.mjs --cleanup
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && github.event_name == 'workflow_dispatch'
+          GP_WORKFLOW_STATUS: ${{ job.status }}
+        run: |
+          node src/ci-capture.mjs finish paired
+          cat "runs/$GP_RUN_ID/report.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain every attempt including failed measurements
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
         with:
           name: grand-prix-paired-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            benchmarks/grand-prix/results/*.json
-            benchmarks/grand-prix/results/*.lock
-            benchmarks/grand-prix/results/*-paired/
-            benchmarks/grand-prix/results/*-runtime/
-            benchmarks/grand-prix/results/*-render-counts/
-            benchmarks/grand-prix/results/raw/
+          path: runs/${{ env.GP_RUN_ID }}/
           if-no-files-found: error
           retention-days: 30
+          include-hidden-files: true

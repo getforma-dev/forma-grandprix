@@ -69,6 +69,41 @@ test('failures, missing samples and selected missing competitors stay visible', 
   assert(report.comparisons.every(comparison => comparison.status === 'not-comparable'));
 });
 
+test('a passing published trial cannot conceal a missing candidate trial', t => {
+  const dir = fixture(t);
+  write(dir, 'manifest.json', { ...manifest(), expected: [
+    { event: 'dom', car: 'forma', trial: 'artifacts/published' },
+    { event: 'dom', car: 'forma', trial: 'artifacts/candidate' },
+  ] });
+  write(dir, 'artifacts/published/raw/dom/forma.json', dom([10, 12, 14]));
+  const missing = collectReport(dir).measurements.filter(row => row.metric === 'missing');
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].trial, 'artifacts/candidate');
+});
+
+test('compression encodings are discovered as separate trials without a raw directory', t => {
+  const dir = fixture(t); write(dir, 'manifest.json', manifest());
+  for (const encoding of ['identity', 'br', 'gzip']) {
+    write(dir, `artifacts/test-compression/${encoding}/sprint/forma.json`, { trials: [{ requests: { average: 100 } }], campaign });
+  }
+  const report = collectReport(dir);
+  assert.equal(report.evidence.length, 3);
+  assert.deepEqual([...new Set(report.measurements.map(row => row.trial))].sort(), ['br', 'gzip', 'identity'].map(encoding => `artifacts/test-compression/${encoding}`));
+});
+
+test('human report preserves original failure and separates lab and Forma commits after import', t => {
+  const dir = fixture(t);
+  write(dir, 'manifest.json', { ...manifest(), status: 'imported', remote: { runId: 123, attempt: 2, originalManifest: {
+    status: 'failed', quality: 'unqualified', labSourceCommit: 'a'.repeat(40), formaSourceCommits: ['b'.repeat(40)], config: { suite: 'server', profile: 'gha-4-v1' },
+  } } });
+  generateReport(dir);
+  const output = fs.readFileSync(path.join(dir, 'report.md'), 'utf8');
+  assert(output.includes('failed · unqualified'));
+  assert(output.includes('Laboratory commit:** ' + 'a'.repeat(40)));
+  assert(output.includes('Forma candidate commits:** ' + 'b'.repeat(40)));
+  assert(output.includes('123 / 2'));
+});
+
 test('different campaigns and unlike batching semantics never produce ratios', t => {
   const dir = fixture(t);
   write(dir, 'raw/signals/forma.json', { correct: true, runs: 3, campaign, benches: { batch: { runs: [10, 12, 14] } } });
