@@ -42,6 +42,13 @@ test('an active or interrupted run blocks dispatch, local controls and evidence 
  const f=await fixture(t);f.put('.grandprix/active.json',{pid:1,runId:'owned'});assert.equal((await f.post('/api/dispatch',{suite:'server'})).status,400);assert.equal((await f.post('/api/local',{action:'doctor'})).status,400);
  const task=await(await f.post('/api/import',{runId:123,attempt:1})).json();assert.equal((await settled(f,task.id)).status,'failed');assert.equal(f.calls.length,0);
 });
+test('archive restoration rejects arbitrary paths, extra inputs and cross-origin requests before queueing',async t=>{
+ const f=await fixture(t);
+ for(const input of [{catalog:'../archive.zip'},{catalog:'https://example.test/archive.json'},{catalog:'evidence/catalog/1-1-1.json',url:'https://example.test'}])assert.equal((await f.post('/api/restore',input)).status,400);
+ assert.equal((await f.post('/api/restore',{catalog:'evidence/catalog/1-1-1.json'},{Origin:'https://example.test'})).status,403);
+ f.put('.grandprix/active.json',{pid:1,runId:'owned'});assert.equal((await f.post('/api/restore',{catalog:'evidence/catalog/1-1-1.json'})).status,400);
+ assert.equal(f.calls.length,0);assert.equal((await f.get('/api/state')).tasks.length,0);
+});
 test('completed rerun attempts remain importable; the same attempt is deduplicated',async t=>{
  const f=await fixture(t);const one=await(await f.post('/api/import',{runId:123,attempt:1})).json();await settled(f,one.id);const duplicate=await(await f.post('/api/import',{runId:123,attempt:1})).json();assert.equal(one.id,duplicate.id);
  const two=await(await f.post('/api/import',{runId:123,attempt:2})).json();await settled(f,two.id);assert.notEqual(two.id,one.id);assert.deepEqual(f.calls.filter(call=>call[0]==='import'),[['import','123',1],['import','123',2]]);
@@ -70,4 +77,30 @@ test('public catalog envelope rejects missing identity, unsafe URLs, bad hashes 
 test('catalog filesystem problems are reported without breaking the control state',async t=>{
  const f=await fixture(t);f.put('evidence/catalog/123-1-456.json',catalogRecord());fs.symlinkSync(path.join(f.root,'config/laboratory.json'),path.join(f.root,'evidence/catalog/124-1-456.json'));const state=await f.get('/api/state');assert.equal(state.catalog.length,1);assert.match(state.catalogErrors[0].error,/Symlink refused/);
  fs.rmSync(path.join(f.root,'evidence/catalog'),{recursive:true});fs.symlinkSync(path.join(f.root,'config'),path.join(f.root,'evidence/catalog'));const damaged=await f.get('/api/state');assert.equal(damaged.catalog.length,0);assert.equal(damaged.catalogErrors[0].path,'evidence/catalog');assert.equal(damaged.history.length,1);
+});
+function followedRun(changes={}){return{id:123,attempt:1,workflow:'.github/workflows/grand-prix.yml',headSha:sha,repository:'getforma-dev/forma-grandprix',url:'https://github.com/getforma-dev/forma-grandprix/actions/runs/123',status:'in_progress',conclusion:null,jobs:[],...changes};}
+test('follow validates an existing exact attempt, deduplicates it, and imports completion without dispatch',async t=>{
+ const run=followedRun(),f=await fixture(t,{detail:async()=>({...run})});
+ const response=await f.post('/api/follow',{runId:123,attempt:1});assert.equal(response.status,202);const follow=await response.json();assert.equal(follow.kind,'follow');assert.equal(follow.status,'watching');assert.equal(follow.result.headSha,sha);assert.equal(follow.input.runId,'123');
+ const duplicate=await(await f.post('/api/follow',{runId:123,attempt:1})).json();assert.equal(duplicate.id,follow.id);await f.app.refreshRemote(true);assert.equal(f.calls.length,0);
+ run.status='completed';run.conclusion='failure';await f.app.refreshRemote(true);const watching=await f.get('/api/tasks/'+follow.id);assert(watching.importScheduled);await settled(f,watching.importScheduled);await f.app.refreshRemote(true);const done=await f.get('/api/tasks/'+follow.id);assert.equal(done.status,'completed');assert.equal(done.remoteConclusion,'failure');assert.deepEqual(f.calls,[['import','123',1]]);assert(done.result.report);
+});
+test('follow refuses wrong attempts, unknown workflows, foreign repositories and missing exact source',async t=>{
+ for(const changes of [{attempt:2},{workflow:'.github/workflows/unknown.yml'},{repository:'other/repo'},{headSha:'main'},{id:456},{url:'https://github.com/other/repo/actions/runs/123'}]){
+  const f=await fixture(t,{detail:async()=>followedRun(changes)});const response=await f.post('/api/follow',{runId:123,attempt:1});assert.equal(response.status,400,JSON.stringify(changes));assert.equal(f.calls.length,0);assert.equal((await f.get('/api/state')).tasks.length,0);
+ }
+});
+test('a followed rerun or source mismatch fails visibly and never switches the imported attempt',async t=>{
+ for(const changes of [{attempt:2},{headSha:'b'.repeat(40)}]){
+  const run=followedRun(),f=await fixture(t,{detail:async()=>({...run})});const follow=await(await f.post('/api/follow',{runId:123,attempt:1})).json();Object.assign(run,changes,{status:'completed'});await f.app.refreshRemote(true);const task=await f.get('/api/tasks/'+follow.id);assert.equal(task.status,'failed');assert.match(task.error,/attempt changed|source changed/);assert.equal(task.input.attempt,1);assert.equal(f.calls.length,0);
+ }
+});
+test('following persists across server restart and works outside the recent workflow list',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'gp-follow-restart-'));writeJSON(path.join(root,'config/laboratory.json'),{suites:{}});let imports=0;const run=followedRun();const github={account:async()=>({connected:true}),runs:async()=>[],detail:async()=>({...run}),importRun:async(id,progress,attempt)=>{assert.equal(id,'123');assert.equal(attempt,1);imports++;return{id:'kept-follow'};}};
+ let app=await startControlServer({root,port:0,github});t.after(async()=>{await app.close();fs.rmSync(root,{recursive:true,force:true});});await app.accountReady;const state=await(await fetch(app.url+'/api/state')).json();const response=await fetch(app.url+'/api/follow',{method:'POST',headers:{Origin:app.url,'Content-Type':'application/json','X-GrandPrix-CSRF':state.csrf},body:JSON.stringify({runId:123,attempt:1})});const follow=await response.json();assert.equal(follow.status,'watching');await app.close();
+ app=await startControlServer({root,port:0,github});await app.accountReady;let task=await(await fetch(app.url+'/api/tasks/'+follow.id)).json();assert.equal(task.status,'watching');assert.equal(imports,0);run.status='completed';await app.refreshRemote(true);await new Promise(resolve=>setTimeout(resolve,10));await app.refreshRemote(true);task=await(await fetch(app.url+'/api/tasks/'+follow.id)).json();assert.equal(task.status,'completed');assert.equal(imports,1);await app.refreshRemote(true);assert.equal(imports,1);
+});
+test('follow retries temporary read failures and waits for the local laboratory before importing',async t=>{
+ let fail=false;const run=followedRun(),f=await fixture(t,{detail:async()=>{if(fail)throw Error('temporary API outage');return{...run};}});const follow=await(await f.post('/api/follow',{runId:123,attempt:1})).json();fail=true;await f.app.refreshRemote(true);let task=await f.get('/api/tasks/'+follow.id);assert.equal(task.status,'watching');assert.match(task.error,/retry/);assert.equal(f.calls.length,0);
+ fail=false;run.status='completed';f.put('.grandprix/active.json',{pid:1,runId:'another'});await f.app.refreshRemote(true);task=await f.get('/api/tasks/'+follow.id);assert.equal(task.status,'watching');assert.match(task.error,/will wait/);assert.equal(f.calls.length,0);fs.unlinkSync(path.join(f.root,'.grandprix/active.json'));await f.app.refreshRemote(true);task=await f.get('/api/tasks/'+follow.id);await settled(f,task.importScheduled);assert.equal(f.calls.length,1);
 });

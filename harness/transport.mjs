@@ -68,11 +68,11 @@ export function assertSampleRepresentation(run, response, headers = requestHeade
   assert.deepEqual(run.arguments, ohaArguments(run.target, run.requested, headers), 'load arguments differ');
   const raw = run.rawOha;
   assert(raw?.summary && raw.statusCodeDistribution, 'complete oha output required');
-  for (const key of ['totalData', 'sizePerRequest']) natural(raw.summary[key], `oha ${key}`);
   const statuses = Object.values(raw.statusCodeDistribution);
   statuses.forEach(n => natural(n, 'status count'));
   const completed = statuses.reduce((sum, n) => sum + n, 0);
-  assert(completed > 0, 'no completed requests');
+  assert(completed > 0, `No HTTP responses completed during the ${run.requested.z}-second load interval at concurrency ${run.requested.c}. Throughput, latency and response-size measurements are unavailable; inspect the retained transport output.`);
+  for (const key of ['totalData', 'sizePerRequest']) natural(raw.summary[key], `oha ${key}`);
   assert.equal(completed, run.requests); assert.equal(raw.statusCodeDistribution['200'], completed, 'non-200 load response');
   assert.equal(run.ok, completed); assert.equal(run.nonOk, 0);
   assert.deepEqual(run.statusCodes, raw.statusCodeDistribution);

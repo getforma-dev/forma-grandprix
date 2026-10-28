@@ -30,6 +30,7 @@ Run from the Forma Grand Prix repository: npm run gp -- <command>
   compare <baseline> <current>    Gate comparisons on protocol and campaign identity
   verify <run-id>                  Check retained evidence for changed/missing files
   archive <run-id> [--publish]    Plan durable publication; publish exact ZIP and catalog
+  restore-archive <catalog-path> Restore a published archive without Actions artifacts
   recover <run-id> [--apply]       Recover a proven-dead local run; preserve its evidence
   cleanup <run-id> [--apply]      Preview cleanup (add --dependencies or --docker)
   updates                         Check current npm registry versions (read-only)
@@ -124,6 +125,11 @@ export async function main(argv=process.argv.slice(2),root=ROOT) {
     assertOptions(options,['publish']);if(options._.length!==1)throw Error('Supply one verified imported run ID');
     const {archivePlan,publishArchive}=await import('./archive.mjs');
     const plan=await archivePlan(root,options._[0]);print(options.publish?await publishArchive(root,plan):plan);return 0;
+  }
+  if(command==='restore-archive') {
+    assertOptions(options,[]);if(options._.length!==1)throw Error('Supply one versioned evidence/catalog/*.json path');
+    const {restoreArchive}=await import('./archive-restore.mjs');
+    print(await restoreArchive(root,options._[0]));return 0;
   }
   if(command==='catalog'){assertOptions(options,[]);print(config(root));return 0;}
   if(command==='changes') {assertOptions(options,[]);const ledger=readLedger(path.join(root,'config/change-ledger.json'));print(renderChanges(ledger));return 0;}

@@ -4,12 +4,13 @@ import { entrantsFor } from './registry.mjs';
 // One owned, sequential Linux run. No resource outside this run is pruned.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, statfsSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, statfsSync } from 'node:fs';
 import os from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareCars, BASELINE_SOURCE } from './prepare-car.mjs';
 import { hostProfile, validateEngineProfile } from './resource-profile.mjs';
+import { runEntrantSequence, assertOwnedEntrantImage, assertEntrantRaceFailure } from './entrant-sequence.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 assert(!process.env.GP_RAW_DIR && !process.env.GP_ACCEPT_ENCODING, 'this driver owns raw-output and request-encoding selection');
@@ -65,7 +66,7 @@ function run(program, args, cwd = root) {
   return new Promise((ok, fail) => {
     child = spawn(program, args, { cwd, stdio: 'inherit', env: process.env });
     child.once('error', fail);
-    child.once('close', code => { child = undefined; code === 0 ? ok() : fail(new Error(`${program} exited ${code}`)); });
+    child.once('close', (code, signal) => { child = undefined; if (code === 0) ok(); else { const error = new Error(`${program} exited ${code}${signal ? ' (' + signal + ')' : ''}`); error.exitCode = code; error.signal = signal; fail(error); } });
   });
 }
 let stopping = false;
@@ -85,6 +86,54 @@ async function build(car, context) {
   await run('docker', [...buildArgs, '-t', imageName(car), context]);
   await run('docker', [...buildArgs, '--target', 'build', '-t', imageName(car + '-build'), context]);
 }
+function checkCampaignSafety() {
+  assert(!stopping, 'run interrupted'); checkDisk();
+  assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), labSourceCommit, 'laboratory source commit changed');
+  assert.equal(execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, encoding: 'utf8' }).trim(), '', 'laboratory source changed');
+  assert.deepEqual(hostProfile({ diagnostic }), resourceProfile, 'host resource profile changed');
+  validateEngineProfile(resourceProfile, JSON.parse(execFileSync('docker', ['info', '--format', '{{json .}}'], { encoding: 'utf8' })));
+}
+function retainRaceReceipt(car, step) {
+  const raw = join(results, 'raw', `_run-${id}.json`);
+  assert(existsSync(raw), 'race did not produce its completed entrant receipt');
+  const receipt = JSON.parse(readFileSync(raw, 'utf8'));
+  assert.equal(receipt.runId, id, 'race receipt run differs'); assert.deepEqual(receipt.cars, [car], 'race receipt entrant differs');
+  assert.deepEqual(receipt.campaign, campaign, 'race receipt campaign differs');
+  const relative = `${id}-entrant-${car}-race.json`;
+  assert(!existsSync(join(results, relative)), 'entrant race receipt already retained');
+  writeFileSync(join(results, relative), JSON.stringify(receipt, null, 2) + '\n'); step.raceReceipt = relative;
+}
+async function mayContinue(error, step) {
+  if (stopping || error.signal || error.exitCode !== 1 || !['build', 'race'].includes(step.phase)) return false;
+  checkCampaignSafety();
+  if (step.phase === 'race') {
+    assert(step.raceReceipt, 'failed race did not produce its own completed receipt');
+    const receipt = JSON.parse(readFileSync(join(results, step.raceReceipt), 'utf8'));
+    assertEntrantRaceFailure(receipt, step.car, id, campaign);
+  }
+  return true;
+}
+async function cleanupEntrant(car) {
+  // A race trap is best-effort; confirm no owned process/network remains before
+  // proceeding. The shared load-generator image and other tags are untouched.
+  const errors = [], attempt = async action => { try { await action(); } catch (error) { errors.push(String(error)); } };
+  for (const [query, remove] of [[['ps', '-aq'], ['rm', '-f']], [['network', 'ls', '-q'], ['network', 'rm']]]) await attempt(async () => {
+    const ids = execFileSync('docker', [...query, '--filter', 'label=' + label], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean);
+    if (ids.length) await run('docker', [...remove, ...ids]);
+  });
+  for (const tag of [imageName(car), imageName(car + '-build')]) await attempt(async () => {
+    const present = execFileSync('docker', ['image', 'ls', '--quiet', '--no-trunc', '--filter', 'reference=' + tag], { encoding: 'utf8' }).trim();
+    if (!present) return;
+    const image = JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { encoding: 'utf8' }))[0];
+    assertOwnedEntrantImage(image, tag, id); await run('docker', ['image', 'rm', tag]);
+  });
+  await attempt(async () => {
+    assert(ownership.builderCreated && ownership.builder === builder, 'builder ownership is not established');
+    await run('docker', ['buildx', 'prune', '--builder', builder, '--all', '--force']);
+  });
+  assert.equal(errors.length, 0, 'entrant cleanup incomplete: ' + errors.join('; '));
+}
+
 try {
   checkDisk();
   const contexts = prepareCars(root, join(results, `${id}-contexts`), { baseline, formaRef, compression });
@@ -92,67 +141,72 @@ try {
   ownership.builderCreated = true;
   writeFileSync(ownershipPath, JSON.stringify(ownership));
   await run('docker', [...buildArgs, '-t', imageName('loadgen'), 'harness/loadgen']);
-  for (const car of cars) {
-    await build(car, join(contexts, car));
-    if (car === 'forma') {
-      const bytes = execFileSync('docker', ['run', '--rm', '--label', label, imageName('forma-build'),
-        'stat', '-c', '%s', '/app/target/release/grandprix-forma'], { encoding: 'utf8' }).trim();
-      report.releaseBinaryBytes = Number(bytes);
-      if (formaRef) for (const file of ['Cargo.lock', 'candidate-source.json', 'candidate-metadata.json']) {
-        writeFileSync(join(results, `${id}-forma-${file}`),
-          execFileSync('docker', ['run', '--rm', '--label', label, imageName('forma-build'), 'cat', `/app/${file}`],
-            { maxBuffer: 16 * 1024 * 1024 }));
-      }
-    }
-    await quiet();
-    const before = { car, at: new Date().toISOString(), load: os.loadavg(), freeBytes: free() };
-    if (compression) {
-      const directory = join(results, `${id}-compression`);
-      assert(!existsSync(directory), 'fresh compression observations required'); mkdirSync(directory);
-      try {
-        for (const encoding of ['identity', 'br', 'gzip']) {
-          await quiet();
-          process.env.GP_ACCEPT_ENCODING = encoding;
-          process.env.GP_RAW_DIR = join(directory, encoding);
-          assert(!existsSync(process.env.GP_RAW_DIR));
-          await run(process.execPath, ['harness/race.mjs', '--cars', car, '--events', events]);
+  const sequence = await runEntrantSequence({ cars, beforeEach: checkCampaignSafety, cleanup: cleanupEntrant, recoverable: mayContinue,
+    onStep: step => { const index = report.steps.findIndex(existing => existing.car === step.car); if (index < 0) report.steps.push(step); else report.steps[index] = step; save(); },
+    execute: async (car, phase, step) => {
+      phase('build');
+      await build(car, join(contexts, car));
+      if (car === 'forma') {
+        const bytes = execFileSync('docker', ['run', '--rm', '--label', label, imageName('forma-build'),
+          'stat', '-c', '%s', '/app/target/release/grandprix-forma'], { encoding: 'utf8' }).trim();
+        report.releaseBinaryBytes = Number(bytes);
+        if (formaRef) for (const file of ['Cargo.lock', 'candidate-source.json', 'candidate-metadata.json']) {
+          writeFileSync(join(results, `${id}-forma-${file}`),
+            execFileSync('docker', ['run', '--rm', '--label', label, imageName('forma-build'), 'cat', `/app/${file}`],
+              { maxBuffer: 16 * 1024 * 1024 }));
         }
-      } finally { delete process.env.GP_ACCEPT_ENCODING; delete process.env.GP_RAW_DIR; }
-      await run(process.execPath, ['harness/compression-report.mjs', directory, ...(diagnostic ? ['--diagnostic'] : [])]);
-      report.compressionEvidence = directory;
-    } else {
-      await run(process.execPath, ['harness/race.mjs', '--cars', car, '--events', events]);
-    }
-    report.steps.push({ ...before, finished: new Date().toISOString(), loadAfter: os.loadavg() }); save();
-    if (car === 'forma') {
-      const sourceImage = JSON.parse(execFileSync('docker', ['image', 'inspect', imageName(car)], { encoding: 'utf8' }))[0].Id;
-      const comparison = join(results, `${id}-runtime`);
-      const sourceArgs = ['--lab-source-commit', labSourceCommit, '--source-kind', formaRef ? 'framework-candidate' : baseline ? 'forma-baseline-adapter' : 'laboratory-adapter', ...(formaRef ? ['--forma-source-commit', formaRef] : [])];
-      await run(process.execPath, ['harness/compare-runtime.mjs', '--source-image', sourceImage,
-        '--source-commit', formaRef ?? (baseline ? BASELINE_SOURCE : labSourceCommit), ...sourceArgs,
-        '--builder', builder, '--out', comparison]);
-      report.runtimeComparison = { directory: comparison, sourceImage }; save();
-      if (!compression) {
-        const buildImage = JSON.parse(execFileSync('docker', ['image', 'inspect', imageName('forma-build')], { encoding: 'utf8' }))[0].Id;
-        const counts = join(results, `${id}-render-counts`);
-        await run(process.execPath, ['harness/render-counts.mjs', '--runtime-image', sourceImage,
-          '--build-image', buildImage, '--source-commit', formaRef ?? (baseline ? BASELINE_SOURCE : labSourceCommit), ...sourceArgs,
-          '--out', counts, ...(diagnostic ? ['--diagnostic'] : [])]);
-        report.renderCounts = { directory: counts, runtimeImage: sourceImage, buildImage }; save();
+      }
+      phase('settling'); await quiet();
+      Object.assign(step, { at: new Date().toISOString(), load: os.loadavg(), freeBytes: free() });
+      phase('race');
+      if (compression) {
+        const directory = join(results, `${id}-compression`);
+        assert(!existsSync(directory), 'fresh compression observations required'); mkdirSync(directory);
+        try {
+          for (const encoding of ['identity', 'br', 'gzip']) {
+            await quiet();
+            process.env.GP_ACCEPT_ENCODING = encoding;
+            process.env.GP_RAW_DIR = join(directory, encoding);
+            assert(!existsSync(process.env.GP_RAW_DIR));
+            await run(process.execPath, ['harness/race.mjs', '--cars', car, '--events', events]);
+          }
+        } finally { delete process.env.GP_ACCEPT_ENCODING; delete process.env.GP_RAW_DIR; }
+        await run(process.execPath, ['harness/compression-report.mjs', directory, ...(diagnostic ? ['--diagnostic'] : [])]);
+        report.compressionEvidence = directory;
+      } else {
+        try { await run(process.execPath, ['harness/race.mjs', '--cars', car, '--events', events]); }
+        finally { retainRaceReceipt(car, step); }
+      }
+      step.loadAfter = os.loadavg(); save();
+      phase('analysis');
+      if (car === 'forma') {
+        const sourceImage = JSON.parse(execFileSync('docker', ['image', 'inspect', imageName(car)], { encoding: 'utf8' }))[0].Id;
+        const comparison = join(results, `${id}-runtime`);
+        const sourceArgs = ['--lab-source-commit', labSourceCommit, '--source-kind', formaRef ? 'framework-candidate' : baseline ? 'forma-baseline-adapter' : 'laboratory-adapter', ...(formaRef ? ['--forma-source-commit', formaRef] : [])];
+        await run(process.execPath, ['harness/compare-runtime.mjs', '--source-image', sourceImage,
+          '--source-commit', formaRef ?? (baseline ? BASELINE_SOURCE : labSourceCommit), ...sourceArgs,
+          '--builder', builder, '--out', comparison]);
+        report.runtimeComparison = { directory: comparison, sourceImage }; save();
+        if (!compression) {
+          const buildImage = JSON.parse(execFileSync('docker', ['image', 'inspect', imageName('forma-build')], { encoding: 'utf8' }))[0].Id;
+          const counts = join(results, `${id}-render-counts`);
+          await run(process.execPath, ['harness/render-counts.mjs', '--runtime-image', sourceImage,
+            '--build-image', buildImage, '--source-commit', formaRef ?? (baseline ? BASELINE_SOURCE : labSourceCommit), ...sourceArgs,
+            '--out', counts, ...(diagnostic ? ['--diagnostic'] : [])]);
+          report.renderCounts = { directory: counts, runtimeImage: sourceImage, buildImage }; save();
+        }
       }
     }
-    // Remove only images just built by this run, and this run's builder cache.
-    await run('docker', ['image', 'rm', imageName(car), imageName(car + '-build')]);
-    await run('docker', ['buildx', 'prune', '--builder', builder, '--all', '--force']);
-    checkDisk();
-  }
-  report.passed = true;
+  });
+  report.passed = sequence.passed; report.failures = sequence.failures; report.skippedCars = sequence.skippedCars;
+  if (sequence.aborted) { report.aborted = true; report.error = sequence.error; }
+  if (!sequence.passed) process.exitCode = 1;
 } catch (error) {
   report.error = String(error);
   process.exitCode = 1;
 } finally {
   save();
   try { await run(process.execPath, ['harness/cleanup.mjs']); }
-  catch (error) { report.cleanupError = String(error); process.exitCode = 1; }
+  catch (error) { report.cleanupError = String(error); report.passed = false; process.exitCode = 1; }
   report.freeAfter = free(); report.finished = new Date().toISOString(); save();
 }

@@ -59,3 +59,7 @@ test('subprocess runner bounds output and duration without invoking a shell',asy
  await assert.rejects(runCommand(process.execPath,['-e','process.stdout.write("x".repeat(10000))'],{maxBytes:10}),/output limit/);
  await assert.rejects(runCommand(process.execPath,['-e','setInterval(()=>{},1000)'],{timeout:30}),/time limit/);
 });
+test('workflow detail supplies exact follow identity without exposing account credentials',async t=>{
+ const root=fixture(t),run={id:123,run_attempt:2,path:'.github/workflows/grand-prix.yml',head_sha:sha,repository:{full_name:REPOSITORY},status:'in_progress',html_url:`https://github.com/${REPOSITORY}/actions/runs/123`};
+ const github=createGitHub(root,{command:async(program,args)=>({stdout:JSON.stringify(args[1].includes('/jobs?')?{jobs:[]}:run)})});const detail=await github.detail(123);assert.equal(detail.attempt,2);assert.equal(detail.workflow,run.path);assert.equal(detail.headSha,sha);assert.equal(detail.repository,REPOSITORY);assert.deepEqual(detail.jobs,[]);
+});

@@ -56,6 +56,9 @@ supported test selection, review the exact Forma revision, and launch the remote
 run. GitHub authentication is provided by the local `gh` CLI; credentials never
 enter browser JavaScript. Test execution happens on GitHub. The panel shows remote
 progress and provides artifact synchronization into the local evidence history.
+For a run launched elsewhere, **Follow & import** binds its exact attempt and
+imports when it finishes. Keep the local server running, or restart it to resume
+following. No second campaign is launched by following an existing one.
 
 Server tests support entrant and event selection. The client suite retains its
 paired complete grid because filtering it would change that campaign contract.
@@ -82,6 +85,9 @@ then add `--publish` to preserve the exact ZIP as a durable GitHub release asset
 Commit the small `evidence/catalog/` record, which binds its digest and source
 references to the original outcome. Keep the before/after rationale and accepted
 costs in `config/change-ledger.json`. Do not overwrite historical controls.
+Published records have a **Restore locally** control, which verifies and restores
+their exact release ZIP independently of the temporary Actions artifact. The CLI
+equivalent is `npm run gp -- restore-archive evidence/catalog/RUN-ATTEMPT-ARTIFACT.json`.
 
 Performance targets and measurement validity are separate. A complete server
 campaign can retain qualified evidence while failing CI for a missed target, but

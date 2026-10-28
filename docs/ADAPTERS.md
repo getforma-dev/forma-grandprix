@@ -18,6 +18,13 @@ New client libraries need the exact deterministic data and keyed DOM semantics;
 add the entrant to the runner and paired trial grid together. Island activation
 uses its native APIs and must preserve server nodes and pass 0→1→2 interaction.
 
+The island driver and browser runner both use the central identity registry.
+Registering an ID does not waive its measurement contract. The explicit Next/Astro
+exceptions for an unavailable internal activation boundary live in
+`island-race/run.mjs` and `src/report.mjs`; adding another such capability requires
+reviewing both gates and adding refusal controls. Common readiness and interaction
+checks remain required for every island entrant.
+
 Update procedure:
 
 1. Read the change ledger and prior rejected experiments. State the hypothesis,

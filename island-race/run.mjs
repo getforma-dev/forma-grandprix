@@ -1,5 +1,6 @@
 import { readCampaign } from '../harness/campaign.mjs';
 import { islandSourceIdentity } from '../harness/island-source.mjs';
+import { entrantsFor } from '../harness/registry.mjs';
 // One production car per invocation; the portable driver owns its container.
 import puppeteer from 'puppeteer-core';
 import { createHash } from 'node:crypto';
@@ -17,7 +18,7 @@ for (let i=2; i<process.argv.length; i++) {
   if (!key.startsWith('--')) throw new Error(`unexpected argument ${key}`);
   args[key.slice(2)] = process.argv[i+1]?.startsWith('--') || !process.argv[i+1] ? true : process.argv[++i];
 }
-const cars=['forma','react-node','react-bun','react-deno','preact-node','solid-node','svelte-node','vue-node','next','react-router','astro'];
+const cars=entrantsFor('islands');
 if (!cars.includes(args.car) || !args.url || !args.chrome || !args.out) throw new Error('--car, --url, --chrome and --out are required');
 const sourceUrl=new URL('/island',args.url).href;
 const diagnostic=args.diagnostic===true;

@@ -63,6 +63,15 @@ export function readControlCatalog(root) {
   catalog.sort((a,b) => b.observedAt.localeCompare(a.observedAt));
   return { catalog, catalogErrors };
 }
+function followedIdentity(run, input, bound) {
+  if (String(run.id) !== String(input.runId) || run.repository !== REPOSITORY || run.url !== `https://github.com/${REPOSITORY}/actions/runs/${input.runId}`) throw Error('Followed run repository or identity differs');
+  if (run.attempt !== input.attempt) throw Error(`Followed attempt changed from ${input.attempt} to ${run.attempt}; the new attempt was not selected.`);
+  if (!Object.values(WORKFLOWS).some(workflow => run.workflow === '.github/workflows/' + workflow.file)) throw Error('Only registered Grand Prix workflows can be followed');
+  if (!/^[a-f0-9]{40}$/.test(run.headSha || '')) throw Error('Followed run requires an exact laboratory source commit');
+  if (!['queued','requested','waiting','pending','in_progress','completed'].includes(run.status)) throw Error('Unknown followed workflow status');
+  if (bound && (run.workflow !== bound.workflow || run.headSha !== bound.headSha)) throw Error('Followed workflow or laboratory source changed');
+  return { repository: run.repository, workflow: run.workflow, headSha: run.headSha, url: run.url };
+}
 function taskView(task) { return { ...task }; }
 export async function startControlServer({ root = ROOT, port = 4317, github = createGitHub(root), command = runCommand, open = false } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw Error('Invalid local port');
@@ -98,6 +107,36 @@ export async function startControlServer({ root = ROOT, port = 4317, github = cr
     if (existing) return taskView(existing);
     return enqueue('import', { runId, attempt }, async progress => { ensureIdle(); return github.importRun(runId, progress, attempt); });
   }
+  async function followRun(input) {
+    if (Object.keys(input).some(key => !['runId','attempt'].includes(key)) || !/^[1-9]\d{0,19}$/.test(String(input.runId)) || !Number.isSafeInteger(input.attempt) || input.attempt < 1) throw Error('Select an exact GitHub run and attempt');
+    const selected = { runId: String(input.runId), attempt: input.attempt };
+    const detail = await github.detail(selected.runId), identity = followedIdentity(detail, selected);
+    const existing = [...tasks.values()].find(task => task.kind === 'follow' && task.input.runId === selected.runId && task.input.attempt === selected.attempt && ['watching','completed'].includes(task.status));
+    if (existing) return taskView(existing);
+    if (closing || [...tasks.values()].filter(task => task.kind === 'follow' && task.status === 'watching').length >= 8) throw Error('At most eight hosted attempts can be followed at once');
+    const task = { id: randomUUID(), kind: 'follow', input: selected, result: identity, status: 'watching', createdAt: new Date().toISOString(), remoteStatus: detail.status, messages: [] };
+    tasks.set(task.id, task); progress(task, `Following run ${selected.runId}, attempt ${selected.attempt}. Import begins only after that exact attempt completes. The local server must remain running or be restarted to resume following.`);
+    return taskView(task);
+  }
+  async function refreshFollow(task) {
+    if (task.importScheduled) {
+      const imported = tasks.get(task.importScheduled);
+      if (imported?.status === 'completed') { task.status = 'completed'; task.finishedAt = new Date().toISOString(); task.result = { ...task.result, ...imported.result }; delete task.error; save(task); }
+      else if (!imported || ['failed','interrupted'].includes(imported.status)) { task.status = 'failed'; task.finishedAt = new Date().toISOString(); task.error = imported?.error || 'The evidence import was interrupted. Follow again or import explicitly to retry.'; save(task); }
+      return;
+    }
+    let detail;
+    try { detail = await github.detail(task.input.runId); }
+    catch (error) { task.error = 'Remote check will retry: ' + error.message; task.checkedAt = new Date().toISOString(); save(task); return; }
+    try { followedIdentity(detail, task.input, task.result); }
+    catch (error) { task.status = 'failed'; task.error = error.message; task.finishedAt = new Date().toISOString(); save(task); return; }
+    task.remoteStatus = detail.status; task.remoteConclusion = detail.conclusion; task.checkedAt = new Date().toISOString(); delete task.error;
+    if (detail.status === 'completed') {
+      try { ensureIdle(); const imported = scheduleImport(task.input.runId, task.input.attempt); task.importScheduled = imported.id; }
+      catch (error) { task.error = 'Evidence import will wait: ' + error.message; }
+    }
+    save(task);
+  }
   async function refreshRemote(force = false) {
     if (remotePromise) return remotePromise;
     if (!force && remote.refreshedAt && Date.now() - Date.parse(remote.refreshedAt) < 15_000) return remote;
@@ -111,6 +150,7 @@ export async function startControlServer({ root = ROOT, port = 4317, github = cr
           if (run) { task.remoteRunId = run.id; task.remoteStatus = run.status; save(task); }
           if (run?.status === 'completed') { const imported = scheduleImport(run.id, run.attempt); task.importScheduled = imported.id; save(task); }
         }
+        for (const task of [...tasks.values()]) if (task.kind === 'follow' && task.status === 'watching') await refreshFollow(task);
       } catch (error) { remote = { ...remote, error: error.message, refreshedAt: new Date().toISOString() }; }
       return remote;
     })().finally(() => { remotePromise = undefined; }); return remotePromise;
@@ -144,6 +184,16 @@ export async function startControlServer({ root = ROOT, port = 4317, github = cr
         const input = await bodyJSON(request); ensureIdle(); dispatchPlan(root,input);
         const task = enqueue('dispatch', input, progress => { progress('Submitting the selected test plan to GitHub Actions.'); return github.dispatch(input); });
         json(response, 202, task); return;
+      }
+      if (request.method === 'POST' && url.pathname === '/api/follow') { const input = await bodyJSON(request); ensureIdle(); json(response, 202, await followRun(input)); return; }
+      if (request.method === 'POST' && url.pathname === '/api/restore') {
+        const input = await bodyJSON(request); ensureIdle();
+        if (Object.keys(input).some(key => key !== 'catalog') || typeof input.catalog !== 'string' || !/^evidence\/catalog\/[1-9]\d*-[1-9]\d*-[1-9]\d*\.json$/.test(input.catalog)) throw Error('Select a versioned evidence catalog record');
+        json(response, 202, enqueue('restore', input, async progress => {
+          ensureIdle(); progress('Restoring the exact original release archive and verifying its source, outcome and integrity.');
+          const {restoreArchive}=await import('./archive-restore.mjs');
+          return restoreArchive(root,input.catalog,{command,onProgress:progress});
+        })); return;
       }
       if (request.method === 'POST' && url.pathname === '/api/import') { const input = await bodyJSON(request); if (!/^\d+$/.test(String(input.runId))) throw Error('Select a GitHub run'); if (!Number.isInteger(input.attempt) || input.attempt < 1) throw Error('Select a run attempt'); json(response, 202, scheduleImport(input.runId, input.attempt)); return; }
       if (request.method === 'POST' && url.pathname === '/api/local') {

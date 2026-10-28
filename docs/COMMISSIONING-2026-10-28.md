@@ -1,6 +1,6 @@
 # Independent laboratory commissioning — 2026-10-28
 
-The client, island, paired-server and compression campaigns completed on native Linux with verified artifact integrity and qualified measurement records. The client campaign shows substantially higher Forma 3.2 fan-out throughput than its published 3.0 control, alongside remaining creation cost, engine overhead and a lower diamond-workload mean. Paired-server throughput increased; compression reduced response bytes while reducing throughput. These are workload observations, not an overall ranking or proof that a particular code change caused them.
+The client, island, paired-server and compression campaigns completed on native Linux with verified artifact integrity and qualified measurement records. The full competitor server attempt failed and retains partial evidence without overall qualification. The client campaign shows substantially higher Forma 3.2 fan-out throughput than its published 3.0 control, alongside remaining creation cost, engine overhead and a lower diamond-workload mean. Paired-server throughput increased; compression reduced response bytes while reducing throughput. These are workload observations, not an overall ranking or proof that a particular code change caused them.
 
 ## Evidence and scope
 
@@ -10,12 +10,13 @@ The client, island, paired-server and compression campaigns completed on native 
 | Islands, attempt 1 | [42796d26](https://github.com/getforma-dev/forma-grandprix/commit/42796d26717dd92a6615b11e540aec3b1af29a2f) | Frozen registry adapters; **no Forma 3.2 source substitution** | [Run 40691385991](https://github.com/getforma-dev/forma-grandprix/actions/runs/40691385991) · [archive catalog](../evidence/catalog/40691385991-1-12817193788.json) · 64 measured rows and 2 optional unavailable metrics |
 | Paired server, attempt 1 | [0904eff7](https://github.com/getforma-dev/forma-grandprix/commit/0904eff7c19100b223210e3a48ff088138fd56bd) | Published 3.0.0 control, then 3.2.0 native crates in the frozen adapter | [Run 40692625222](https://github.com/getforma-dev/forma-grandprix/actions/runs/40692625222) · [archive catalog](../evidence/catalog/40692625222-1-12817749200.json) · 62 measured rows |
 | Compression, attempt 1 | [0904eff7](https://github.com/getforma-dev/forma-grandprix/commit/0904eff7c19100b223210e3a48ff088138fd56bd) | Same 3.2.0 native candidate with opt-in compression | [Run 40692665750](https://github.com/getforma-dev/forma-grandprix/actions/runs/40692665750) · [archive catalog](../evidence/catalog/40692665750-1-12819160380.json) · 69 measured rows |
+| Full competitor server, attempt 1 | [42796d26](https://github.com/getforma-dev/forma-grandprix/commit/42796d26717dd92a6615b11e540aec3b1af29a2f) | 3.2.0 native candidate; frozen competitor adapters | [Run 40691377704](https://github.com/getforma-dev/forma-grandprix/actions/runs/40691377704) · [archive catalog](../evidence/catalog/40691377704-1-12820168261.json) · **failed / unqualified** · partial evidence |
 
 Original attempt archives are preserved in the [2026-10-28 evidence release](https://github.com/getforma-dev/forma-grandprix/releases/tag/evidence-2026-10-28). Each catalog records the exact asset URL, archive SHA-256, original manifest/seal identities and source revisions; publication does not change qualification.
 
 The earlier [client run 40691381679, attempt 1](https://github.com/getforma-dev/forma-grandprix/actions/runs/40691381679/attempts/1) is retained as **failed and unqualified** in its [archive catalog](../evidence/catalog/40691381679-1-12817287168.json). A setup unit-test fixture inherited the hosted source-selection environment and failed before performance measurement. Revision `0904eff7` isolates that test environment and binds source selection to the requested suite. The successful client campaign above is a **new run**, not a relabeled result or a rerun of that GitHub run ID.
 
-All four used the `gha-4-v1` allocation and Node 24.22.0; the browser lanes used the authenticated Chromium lock. Hosts had four available CPUs: AMD EPYC 9V74 for client, EPYC 7763 for islands and paired server, and Intel Xeon Platinum 8573C for compression. Their campaigns are separate; their times must not be combined into a cross-suite comparison. The shared test fingerprint was `a8f2f41643b44ad35c6e85886f9564a9d5997a439405634ff7898e38de92997f`.
+All five selected the `gha-4-v1` allocation and Node 24.22.0; the browser lanes used the authenticated Chromium lock. Hosts had four available CPUs: AMD EPYC 9V74 for client, EPYC 7763 for islands, paired server and the full server attempt, and Intel Xeon Platinum 8573C for compression. Their campaigns are separate; their times must not be combined into a cross-suite comparison. The shared test fingerprint was `a8f2f41643b44ad35c6e85886f9564a9d5997a439405634ff7898e38de92997f`.
 
 The published client DOM cohort contains Forma, vanilla JavaScript, React, Preact, Solid, Svelte and Vue. The 3.2 candidate DOM cohort contains Forma and a concurrent vanilla control. Both source trials include the five reactive adapters and the separate Alien Signals 3.1.2 engine reference. Compiler templates and row profiling were disabled. This measures the selected core substitution in these fixtures; it is not a coordinated update of every Forma package or a survey of every framework and current release. Competitor versions remain pinned by their frozen locks.
 
@@ -90,6 +91,35 @@ Identity, Brotli and gzip used **one compression-enabled binary** in one campaig
 
 Timings and memory use three repetitions; p99 is the mean of the three per-run percentiles at concurrency 64. Brotli reduces the probe body by **88.20%** while Sprint throughput falls **36.72%** and loaded p99 rises **52.36%**. gzip reduces bytes **87.20%**, with throughput **25.98%** lower and loaded p99 **31.65%** higher. These are same-binary tradeoffs on this host, not evidence that compression universally improves end-to-end performance. The actual gzip response is **2,195 bytes**; the separate harness gzip-level-9 diagnostic of 2,039 bytes is not the server's compressed transfer. No comparison to the paired run's identity throughput is valid across the different machines and binary configurations.
 
+## Full competitor server: incomplete, retained attempt
+
+Run 40691377704 requested all fourteen server adapters and events 1–8. Its seal verifies, cleanup succeeded, and 380 retained metric rows satisfy the raw profile/correctness checks. However, **the attempt is failed and unqualified**: seventeen requested event/adapter combinations are missing. This is not a completed full-grid baseline or a passing budget run. The final strength-budget check was not reached.
+
+Next's 1,000-row preflight returned HTTP 200 with a verified **621,554-byte identity body**. Its five-second, concurrency-64 warmup then completed **zero responses**: oha retained no status counts, zero total bytes, null `sizePerRequest` and `successRate`, and 64 deadline cancellations. The byte validator rejected this as `invalid oha sizePerRequest`. No Endurance samples followed. These nulls must not become a zero-throughput or zero-latency result. Next's other selected events completed; the driver then stopped before React Router and Astro, so all eight events for each remain unmeasured.
+
+The following table preserves every requested adapter. Numeric throughput means each have three ten-second repetitions; parentheses give CV. Entries remain partial observations from a failed attempt.
+
+| Adapter | 100-row SSR, req/s (CV) | 1,000-row SSR, req/s (CV) | Actual 100-row identity body, bytes |
+| --- | ---: | ---: | ---: |
+| Astro | not reached | not reached | not measured |
+| Forma | 1,531.42 (0.44%) | 172.98 (2.24%) | 17,154 |
+| Next | 57.19 (1.21%) | no completed warmup responses | 66,701 |
+| Preact / Node | 2,872.63 (0.21%) | 157.32 (10.56%) | 17,046 |
+| React / Bun | 2,598.68 (0.56%) | 188.28 (1.78%) | 17,046 |
+| React / Deno | 2,864.64 (0.95%) | 235.83 (1.27%) | 17,046 |
+| React / Node | 2,252.82 (0.90%) | 112.54 (0.55%) | 17,046 |
+| React Router | not reached | not reached | not measured |
+| Solid / Node | 4,738.89 (0.19%) | 600.31 (0.37%) | 17,045 |
+| Svelte / Node | 5,605.01 (0.29%) | 553.76 (1.48%) | 17,082 |
+| Vanilla / Bun | 8,655.98 (0.26%) | 1,000.06 (1.03%) | 17,060 |
+| Vanilla / Deno | 6,739.45 (0.30%) | 797.71 (0.27%) | 17,060 |
+| Vanilla / Node | 4,556.23 (3.34%) | 438.21 (1.52%) | 17,060 |
+| Vue / Node | 2,456.04 (0.10%) | 289.26 (3.87%) | 17,061 |
+
+For every completed Sprint entry, the retained load totals equal completed responses multiplied by the listed verified body size. These are transferred identity response-body bytes, excluding HTTP overhead, **not offline gzip diagnostics**. The native Forma substitution retains the same component boundary described in the paired section. Adapter serialization and runtime architecture still differ; this table does not establish product-wide performance.
+
+Forma's 100-row mean is below every completed comparator except Next despite broadly similar body sizes among the smaller adapters. Its 1,000-row mean is above React/Node and Preact/Node but below the remaining completed comparators; Preact's CV exceeds 10%. These are concrete remaining throughput questions. Forma's recorded build mean is 3,648.33 ms over three samples, but a busy-host warning makes that timing exploratory. Completing missing coverage, improving zero-completion diagnostics and continuing independent entrants after one failure are laboratory follow-ups; none retroactively qualifies this original attempt. A focused follow-up needs its own Forma control and campaign identity; results from another host cannot be pooled into this fourteen-adapter comparison.
+
 ## Questions for the next controlled experiment
 
 - Reproduce the diamond decrease while retaining the fan-out and effect improvements; inspect graph-update work before changing an optimization.
@@ -97,5 +127,6 @@ Timings and memory use three repetitions; p99 is the mean of the three per-run p
 - Investigate the engine-relative fan-out cost. Repeat noisy effect and batching observations under a preregistered order or counterbalanced campaign before attributing causes.
 - Keep the smaller client bundle and island transfer evidence distinct from timing results and from a current 3.2 island claim.
 - Test compression against an explicit bandwidth/latency constraint before changing its default; retain throughput, latency and memory costs alongside byte savings.
+- Investigate Next's zero-completion warmup separately; a longer diagnostic warmup would change the protocol and cannot replace its missing qualified Endurance result. Complete the missing competitor coverage in a new retained attempt.
 
-Client and paired-server source trials ran in a fixed order, published before candidate, within their respective hosted campaigns. The small sample sets characterize these runs, not fleet-wide behavior. There is no overall score, statistical significance claim, causal attribution, or newly adopted framework optimization in this report. Existing decisions remain in the [engineering history](PERFORMANCE-HISTORY.md); these findings supply hypotheses and future acceptance questions. The full competitor server campaign requires its own verified section.
+Client and paired-server source trials ran in a fixed order, published before candidate, within their respective hosted campaigns. The small sample sets characterize these runs, not fleet-wide behavior. There is no overall score, statistical significance claim, causal attribution, or newly adopted framework optimization in this report. Existing decisions remain in the [engineering history](PERFORMANCE-HISTORY.md); these findings supply hypotheses and future acceptance questions.

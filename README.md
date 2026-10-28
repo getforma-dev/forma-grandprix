@@ -160,3 +160,13 @@ Commit that catalog record so other reviewers can find the archive and verify it
 SHA-256. Publication keeps the original outcome and qualification, including
 failures. It does not rerun or improve a measurement. The control panel lists
 published archives alongside the local evidence library.
+
+On a fresh checkout, choose **Restore locally** beside a published archive, or use
+`npm run gp -- restore-archive evidence/catalog/40691629399-1-12817388198.json`.
+Restoration downloads the exact release asset, verifies its checksum, original
+seal, source and outcome, and adds its readable report to local history. It does
+not require an unexpired Actions artifact and does not create a new measurement.
+
+To capture a campaign launched directly from GitHub, select **Follow & import**
+beside its hosted activity. Following binds one exact attempt and resumes when
+the local server is restarted; a rerun is a separate attempt to select explicitly.

@@ -25,6 +25,14 @@ function sample(rep, count = 3) {
     requests: count, ok: count, nonOk: 0, successRate: 1, statusCodes: { 200: count }, errorDistribution: { 'aborted due to deadline': 64 } };
   run.wireBytes = wireMeasurement(run, rep); return run;
 }
+test('zero-completed warmup is an explicit unavailable measurement, never normalized to zero', () => {
+  const rep = response(), run = sample(rep, 0);
+  run.requested.z = 5; run.arguments = ohaArguments(run.target, run.requested, run.requestHeaders);
+  run.rawOha.statusCodeDistribution = {}; run.rawOha.summary.sizePerRequest = null; run.rawOha.summary.successRate = null;
+  assert.throws(() => assertSampleRepresentation(run, rep), /No HTTP responses completed during the 5-second load interval at concurrency 64.*unavailable/);
+  assert.equal(run.rawOha.summary.sizePerRequest, null);
+  assert.deepEqual(run.rawOha.statusCodeDistribution, {});
+});
 test('probe and load generator share the Docker-pinned version and explicit headers', () => {
   assert(readFileSync(new URL('./loadgen/Dockerfile', import.meta.url), 'utf8').includes(`ARG OHA_VERSION=v${OHA_VERSION}`));
   assert.deepEqual(requestHeaders(), { 'user-agent': 'oha/1.16.0', accept: '*/*', 'accept-encoding': 'identity' });

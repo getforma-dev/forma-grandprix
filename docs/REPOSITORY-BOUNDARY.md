@@ -17,6 +17,14 @@ original bytes. The source history remains accessible at the exact Forma commit;
 the new repository starts its own version history without importing unrelated
 framework history or rewriting the old repository.
 
+Forma's [cleanup PR #211](https://github.com/getforma-dev/forma/pull/211) merged at
+`442113d9428fdde3a01dcb105d50d3b47fc9ae34`, removing the active benchmark tree and
+its five workflows from the framework. The superseded in-framework laboratory
+[PR #210](https://github.com/getforma-dev/forma/pull/210) and benchmark-only dependency
+[PR #194](https://github.com/getforma-dev/forma/pull/194) were closed. Historical Git
+commits and release evidence remain references; new benchmark development belongs
+in this repository.
+
 The engineering ledger now uses local paths in this repository. Referenced Forma
 release and policy documents are retained under `provenance/forma/`, with original
 paths, source revision and SHA-256 digests in `inventory.json`. The release ancestry

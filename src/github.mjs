@@ -91,7 +91,7 @@ export function createGitHub(root, { command = runCommand } = {}) {
     },
     async detail(id) {
       id = numberId(id); const [run, jobs] = await Promise.all([api(`repos/${REPOSITORY}/actions/runs/${id}`), api(`repos/${REPOSITORY}/actions/runs/${id}/jobs?per_page=50`)]);
-      return { id: run.id, status: run.status, conclusion: run.conclusion, url: run.html_url, jobs: jobs.jobs.map(job => ({ name: job.name, status: job.status, conclusion: job.conclusion,
+      return { id: run.id, attempt: run.run_attempt, workflow: run.path, headSha: run.head_sha, repository: run.repository?.full_name, status: run.status, conclusion: run.conclusion, url: run.html_url, jobs: jobs.jobs.map(job => ({ name: job.name, status: job.status, conclusion: job.conclusion,
         steps: (job.steps || []).map(step => ({ name: step.name, status: step.status, conclusion: step.conclusion, number: step.number })) })) };
     },
     async dispatch(input) {
