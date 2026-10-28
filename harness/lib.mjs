@@ -217,10 +217,11 @@ export async function oha(lg, url, { c, z, evidence, response }) {
   const codes = j.statusCodeDistribution || {};
   const total = Object.values(codes).reduce((a, b) => a + b, 0);
   const ok = codes['200'] || 0;
+  const milliseconds = value => typeof value === 'number' && value >= 0 && Number.isFinite(value * 1000) ? value * 1000 : null;
   const result = {
-    ...raw, seconds: j.summary.total, rps: j.summary.requestsPerSec, okRps: ok / j.summary.total, requests: total, ok, nonOk: total - ok,
+    ...raw, seconds: j.summary.total, rps: total > 0 ? j.summary.requestsPerSec : null, okRps: total > 0 ? ok / j.summary.total : null, requests: total, ok, nonOk: total - ok,
     successRate: j.summary.successRate, statusCodes: codes, errorDistribution: j.errorDistribution,
-    latencyMs: { mean: j.summary.average * 1000, p50: j.latencyPercentiles.p50 * 1000, p95: j.latencyPercentiles.p95 * 1000, p99: j.latencyPercentiles.p99 * 1000, max: j.summary.slowest * 1000 },
+    latencyMs: { mean: milliseconds(j.summary.average), p50: milliseconds(j.latencyPercentiles?.p50), p95: milliseconds(j.latencyPercentiles?.p95), p99: milliseconds(j.latencyPercentiles?.p99), max: milliseconds(j.summary.slowest) },
     bytesPerRequest: j.summary.sizePerRequest, totalData: j.summary.totalData,
   };
   result.wireBytes = wireMeasurement(result, response);

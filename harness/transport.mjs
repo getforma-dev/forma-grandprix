@@ -52,7 +52,7 @@ export function validateResponse(record, headers = requestHeaders()) {
 
 export function wireMeasurement(run, response) {
   return { kind: run.requestHeaders['accept-encoding'] === 'identity' ? 'exact-identity-length' : 'aggregate-encoded-length',
-    meanBytes: run.totalData / run.requests, flooredMeanBytes: run.bytesPerRequest, completedResponses: run.requests,
+    meanBytes: run.requests > 0 ? run.totalData / run.requests : null, flooredMeanBytes: run.bytesPerRequest, completedResponses: run.requests,
     totalBytes: run.totalData, preflightBytes: response.bytes };
 }
 

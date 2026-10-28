@@ -89,13 +89,17 @@ for (const [label, edit] of [
   const rep = response(), run = sample(rep); edit(run, rep); run.wireBytes = wireMeasurement(run, rep); assert.throws(() => assertSampleRepresentation(run, rep));
 });
 
-for (const mode of ['success', 'mismatch', 'malformed', 'process-failure']) test(`oha ${mode} retains exact output before validation`, () => {
+for (const mode of ['success', 'mismatch', 'malformed', 'process-failure', 'no-completion']) test(`oha ${mode} retains exact output before validation`, () => {
   const dir = mkdtempSync(join(tmpdir(), 'gp264-transport-'));
   try {
     const rep = response(), run = sample(rep);
     Object.assign(run.rawOha.summary, { requestsPerSec: .3, average: .001, slowest: .002 });
     run.rawOha.latencyPercentiles = { p50: .001, p95: .002, p99: .002 };
     if (mode === 'mismatch') { run.rawOha.summary.sizePerRequest -= 660; run.rawOha.summary.totalData -= 1980; }
+    if (mode === 'no-completion') {
+      Object.assign(run.rawOha.summary, { totalData: 0, sizePerRequest: null, requestsPerSec: 0, successRate: null, average: null, slowest: null });
+      run.rawOha.statusCodeDistribution = {}; run.rawOha.latencyPercentiles = { p50: null, p95: null, p99: null };
+    }
     const output = mode === 'malformed' ? '{broken-json' : JSON.stringify(run.rawOha);
     writeFileSync(join(dir, 'output'), output); writeFileSync(join(dir, 'response.json'), JSON.stringify(rep));
     writeFileSync(join(dir, 'docker'), `#!${process.execPath}\nprocess.stdout.write(require('node:fs').readFileSync(process.env.FIXTURE_OUTPUT)); process.exit(Number(process.env.FIXTURE_EXIT));\n`);
@@ -114,6 +118,11 @@ for (const mode of ['success', 'mismatch', 'malformed', 'process-failure']) test
     assert.deepEqual(saved.response, rep); assert.deepEqual(saved.arguments, ohaArguments(run.target, run.requested, requestHeaders()));
     if (mode === 'malformed') assert.equal(saved.stdout, output); else assert.deepEqual(saved.rawOha, run.rawOha);
     assert.equal(saved.exitCode, mode === 'process-failure' ? 1 : 0);
+    if (mode === 'no-completion') {
+      assert.deepEqual(saved.latencyMs, { mean: null, p50: null, p95: null, p99: null, max: null });
+      assert.equal(saved.okRps, null); assert.equal(saved.rps, null); assert.equal(saved.wireBytes.meanBytes, null);
+      assert.equal(saved.requests, 0); assert.equal(saved.totalData, 0);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
