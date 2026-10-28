@@ -13,7 +13,8 @@ function fixture(t) {
   const put = (relative, value) => { const file = path.join(root, relative); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value)); return file; };
   put('config/laboratory.json', { protocolVersion: 'test', suites: { server: { cars: ['forma', 'react-node'] }, islands: { cars: ['forma', 'react-node'] }, client: { cars: ['forma', 'react'] } } });
   put('harness/chromium-linux-lock.json', { executableSha256: 'b'.repeat(64) });
-  return { root, put, env: { ...process.env, GP_RUN_ID: 'server-test-1', GP_FORMA_REF: exact, GP_CARS: 'forma', GP_EVENTS: '1', GITHUB_REPOSITORY: 'getforma-dev/forma-grandprix', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GP_REQUEST_ID: 'local-receipt' } };
+  const cleanEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GP_')));
+  return { root, put, env: { ...cleanEnv, GP_RUN_ID: 'server-test-1', GP_FORMA_REF: exact, GP_CARS: 'forma', GP_EVENTS: '1', GITHUB_REPOSITORY: 'getforma-dev/forma-grandprix', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GP_REQUEST_ID: 'local-receipt' } };
 }
 test('hosted defaults qualify only on explicit runtime evidence and preserve exact source selection', t => {
   const f = fixture(t), plan = driverPlan(f.root, 'server', f.env);
@@ -91,4 +92,11 @@ test('zero exit without evidence cannot qualify and source mutation invalidates 
     assert.equal(result.quality, 'unqualified'); assert.equal(result.status, mutate ? 'invalid' : 'completed');
     assert.equal(verify(result.directory).ok, true);
   }
+});
+
+test('attempt source metadata follows its suite even when other lane variables are inherited', t => {
+  const f = fixture(t), env = { ...f.env, GP_FORMA_REFS: 'b'.repeat(40) };
+  assert.deepEqual(beginAttempt(f.root, 'server', env).formaSourceCommits, [exact]);
+  assert.deepEqual(beginAttempt(f.root, 'client', { ...env, GP_RUN_ID: 'client-test-1' }).formaSourceCommits, ['b'.repeat(40)]);
+  assert.deepEqual(beginAttempt(f.root, 'islands', { ...env, GP_RUN_ID: 'islands-test-1' }).formaSourceCommits, []);
 });

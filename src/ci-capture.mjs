@@ -70,7 +70,9 @@ export function beginAttempt(root, suite, env = process.env) {
   const id = env.GP_RUN_ID, dir = runPath(root, id);
   if (fs.existsSync(dir)) throw Error('Run ID already exists; a prior attempt cannot be replaced');
   fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(path.join(dir, 'artifacts'));
-  const source = sourceIdentity(root), refs = (env.GP_FORMA_REFS || env.GP_CLIENT_REFS || env.GP_FORMA_REF || '').split(',').filter(Boolean);
+  const source = sourceIdentity(root);
+  const requested = ['client', 'paired'].includes(suite) ? env.GP_FORMA_REFS || env.GP_CLIENT_REFS : suite === 'islands' ? '' : env.GP_FORMA_REF;
+  const refs = (requested || '').split(',').filter(Boolean);
   const manifest = { schemaVersion: 1, id, protocolVersion: config(root).protocolVersion, testHash: source.testHash,
     status: 'preparing', quality: 'unqualified', mode: env.GP_DIAGNOSTIC === 'true' ? 'diagnostic' : 'qualified', startedAt: new Date().toISOString(),
     source, labSourceCommit: source.commit, formaSourceCommits: refs, environment: environment(),
